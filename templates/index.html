@@ -49,9 +49,7 @@
         .message {
             font-size: 1.1em;
             font-weight: bold;
-            color: #333;
             padding: 10px;
-            background: #e3f2fd;
             border-radius: 8px;
             margin-bottom: 15px;
         }
@@ -215,40 +213,13 @@
             transform: none;
         }
         
-        .btn-primary {
-            background: #4CAF50;
-            color: white;
-        }
-        
-        .btn-secondary {
-            background: #2196F3;
-            color: white;
-        }
-        
-        .btn-warning {
-            background: #ff9800;
-            color: white;
-        }
-        
-        .btn-danger {
-            background: #f44336;
-            color: white;
-        }
-        
-        .btn-purple {
-            background: #9c27b0;
-            color: white;
-        }
-        
-        .btn-success {
-            background: #4caf50;
-            color: white;
-        }
-        
-        .btn-info {
-            background: #00bcd4;
-            color: white;
-        }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-secondary { background: #2196F3; color: white; }
+        .btn-warning { background: #ff9800; color: white; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-purple { background: #9c27b0; color: white; }
+        .btn-success { background: #4caf50; color: white; }
+        .btn-info { background: #00bcd4; color: white; }
         
         .auction-box {
             border: 3px solid #ff6b6b;
@@ -431,7 +402,7 @@
                 <!-- Действия -->
                 <div class="btn-group">
                     <button class="btn btn-secondary" onclick="startGame()" id="startBtn">🚀 Начать игру</button>
-                    <button class="btn btn-primary" onclick="nextRound()" id="nextRoundBtn">➡️ Следующий раунд</button>
+                    <button class="btn btn-primary" onclick="nextRound()" id="nextRoundBtn" style="display:none;">➡️ Следующий раунд</button>
                     <button class="btn btn-purple" onclick="useIntercept()" id="interceptBtn">🦅 Перехват</button>
                 </div>
                 
@@ -463,11 +434,9 @@
         function joinGame(pId) {
             playerId = pId;
             
-            // Показываем игровой экран
             document.getElementById('joinScreen').style.display = 'none';
             document.getElementById('gameScreen').style.display = 'block';
             
-            // Подключаемся к серверу
             socket = io();
             
             socket.on('connect', function() {
@@ -482,7 +451,6 @@
                 console.log('Assigned as:', data.player_id);
                 document.getElementById('playerInfo').textContent = 'Вы: ' + data.name;
                 
-                // Подсвечиваем карточку игрока
                 const card = document.getElementById(data.player_id + 'Card');
                 if (card) {
                     card.classList.add('you');
@@ -507,7 +475,6 @@
                     `;
                     container.style.borderColor = '#4CAF50';
                     setTimeout(() => {
-                        // Возвращаем скрытое состояние
                         if (!gameState || !gameState.containers.find(c => c.id === data.container_id && c.bought)) {
                             container.innerHTML = `
                                 <div class="hidden">❓ Содержимое скрыто</div>
@@ -540,22 +507,16 @@
         function updateGame(state) {
             gameState = state;
             
-            // Обновляем информацию о раунде
             document.getElementById('roundInfo').textContent = `Раунд: ${state.current_round}/${state.max_rounds}`;
             
-            // Обновляем сообщение
             if (state.message) {
                 showMessage('info', state.message);
             }
             
-            // Обновляем игроков
             updatePlayer('player1', state.players.player1, state.players.player2);
             updatePlayer('player2', state.players.player2, state.players.player1);
-            
-            // Обновляем контейнеры
             updateContainers(state.containers);
             
-            // Обновляем аукцион
             if (state.auction_active) {
                 document.getElementById('auctionArea').style.display = 'block';
                 const auction = state.auction;
@@ -568,14 +529,12 @@
                 document.getElementById('auctionArea').style.display = 'none';
             }
             
-            // Обновляем таймер
             if (state.time_remaining !== undefined) {
                 const pct = (state.time_remaining / 30) * 100;
                 document.getElementById('timerFill').style.width = pct + '%';
                 document.getElementById('timerDisplay').textContent = `⏱️ ${Math.ceil(state.time_remaining)}s`;
             }
             
-            // Проверяем окончание игры
             if (state.game_over) {
                 document.getElementById('gameOverScreen').style.display = 'block';
                 const winner = state.winner;
@@ -586,17 +545,15 @@
                         `🎉 Победил ${state.players[winner].name}!`;
                 }
                 document.getElementById('startBtn').disabled = true;
-                document.getElementById('nextRoundBtn').disabled = true;
+                document.getElementById('interceptBtn').disabled = true;
             }
             
-            // Кнопка следующего раунда
             if (state.round_ended) {
                 document.getElementById('nextRoundBtn').style.display = 'block';
             } else {
                 document.getElementById('nextRoundBtn').style.display = 'none';
             }
             
-            // Обновляем статус игрока
             const you = state.players[playerId];
             if (you) {
                 document.getElementById('interceptBtn').disabled = you.used_intercept || state.game_over;
@@ -612,7 +569,6 @@
             document.getElementById(prefix + 'Score').textContent = data.score;
             document.getElementById(prefix + 'Containers').textContent = data.containers_count;
             
-            // Контейнеры
             const list = document.getElementById(prefix + 'ContainersList');
             list.innerHTML = '';
             data.containers.forEach(c => {
@@ -622,7 +578,6 @@
                 list.appendChild(tag);
             });
             
-            // Способности
             document.getElementById(prefix + 'Xray').textContent = data.used_xray ? '✅' : '❌';
             document.getElementById(prefix + 'Intercept').textContent = data.used_intercept ? '✅' : '❌';
         }
@@ -693,9 +648,7 @@
             socket.emit('next_round', {});
         }
         
-        // Инициализация
         document.getElementById('startBtn').disabled = true;
-        document.getElementById('nextRoundBtn').style.display = 'none';
     </script>
 </body>
 </html>
