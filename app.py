@@ -12,14 +12,63 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 # 1. ИГРОВЫЕ КОНСТАНТЫ
 # ---------------------------
 
-VALUES = {"Яхта": 200, "Дом": 100, "Мебель": 40, "Велосипед": -20}
-EMOJIS = {"Яхта": "⛵", "Дом": "🏠", "Мебель": "🪑", "Велосипед": "🚲"}
+# 30+ разных предметов с разной стоимостью
+ITEMS = {
+    "Алмаз": 500,
+    "Золотой слиток": 400,
+    "Платина": 350,
+    "Серебро": 200,
+    "Бронза": 120,
+    "Яхта": 200,
+    "Дом": 100,
+    "Квартира": 85,
+    "Машина": 70,
+    "Мотоцикл": 55,
+    "Мебель": 40,
+    "Телевизор": 35,
+    "Ноутбук": 30,
+    "Телефон": 25,
+    "Планшет": 20,
+    "Велосипед": -20,
+    "Самокат": -15,
+    "Ролики": -10,
+    "Лыжи": -5,
+    "Коньки": -8,
+    "Билет в кино": 15,
+    "Билет в театр": 25,
+    "Билет на концерт": 35,
+    "Ресторан": 45,
+    "Spa-салон": 55,
+    "Путешествие": 80,
+    "Круиз": 120,
+    "Отель": 65,
+    "Вино": 20,
+    "Шампанское": 30,
+    "Коньяк": 40,
+    "Шоколад": 10,
+    "Торт": 15,
+    "Цветы": 12,
+    "Духи": 45,
+    "Часы": 60,
+    "Кольцо": 90,
+    "Ожерелье": 110
+}
+
+# Создаем пул предметов
+POOL = []
+for item, value in ITEMS.items():
+    count = 2 if random.random() > 0.6 else 1
+    POOL.extend([item] * count)
+random.shuffle(POOL)
+
+VALUES = ITEMS
 
 MAX_ROUNDS = 3
 MIN_CONTAINERS = 2
-AUCTION_STEP = 10  # Шаг аукциона 10 фишек
+AUCTION_STEP = 10
 AUCTION_MAX_RAISES = 3
 ROUND_TIMEOUT = 30
+AUCTION_TIMEOUT = 40
 
 # ---------------------------
 # 2. УПРАВЛЕНИЕ ИГРАМИ
@@ -48,6 +97,7 @@ class ContainerGame:
         self.winner = None
         self.message = "Добро пожаловать в игру!"
         self.round_start_time = time.time()
+        self.auction_start_time = None
         self.started = False
         self.players_connected = {'player1': False, 'player2': False}
         self.round_ended = False
@@ -55,14 +105,16 @@ class ContainerGame:
         self.final_results_shown = False
         
     def shuffle_pool(self):
-        pool = ["Яхта"] * 2 + ["Дом"] * 3 + ["Мебель"] * 5 + ["Велосипед"] * 2
+        pool = []
+        for item, value in ITEMS.items():
+            count = 2 if random.random() > 0.6 else 1
+            pool.extend([item] * count)
         random.shuffle(pool)
         return pool
     
     def generate_containers(self):
-        """Генерирует от 1 до 5 контейнеров со случайными ценами"""
         if not self.pool:
-            return []
+            self.pool = self.shuffle_pool()
         
         count = random.randint(1, min(5, len(self.pool)))
         containers = []
@@ -72,7 +124,7 @@ class ContainerGame:
                 break
             
             c_type = self.pool.pop()
-            price = random.randint(5, 65)  # Случайная цена
+            price = random.randint(5, 80)
             
             containers.append({
                 'id': len(containers),
@@ -93,11 +145,11 @@ class ContainerGame:
         container = next((c for c in self.containers if c['id'] == container_id and not c['bought']), None)
         
         if not container:
-            self.message = "❌ Контейнер уже куплен!"
+            self.message = "Ошибка: контейнер уже куплен"
             return False
         
         if player['chips'] < container['price']:
-            self.message = f"❌ Недостаточно фишек! Нужно {container['price']}, есть {player['chips']}"
+            self.message = f"Недостаточно фишек! Нужно {container['price']}, есть {player['chips']}"
             return False
         
         player['chips'] -= container['price']
@@ -105,24 +157,24 @@ class ContainerGame:
         container['bought'] = True
         container['buyer'] = player_id
         
-        self.message = f"✅ {player['name']} купил контейнер!"
+        self.message = f"{player['name']} купил контейнер"
         return True
     
     def use_xray(self, player_id: str, container_id: int):
         player = self.players[player_id]
         
         if player['used_xray']:
-            self.message = "❌ Рентген уже использован!"
+            self.message = "Рентген уже использован"
             return None
         
         container = next((c for c in self.containers if c['id'] == container_id and not c['bought']), None)
         
         if not container:
-            self.message = "❌ Контейнер не найден или уже куплен!"
+            self.message = "Контейнер не найден или уже куплен"
             return None
         
         player['used_xray'] = True
-        self.message = f"🔍 {player['name']} использовал РЕНТГЕН!"
+        self.message = f"{player['name']} использовал рентген"
         return container['type']
     
     def use_intercept(self, player_id: str):
@@ -131,7 +183,7 @@ class ContainerGame:
         other = self.players[other_id]
         
         if player['used_intercept']:
-            self.message = "❌ Перехват уже использован!"
+            self.message = "Перехват уже использован"
             return False
         
         last_bought = None
@@ -141,7 +193,7 @@ class ContainerGame:
                 break
         
         if not last_bought:
-            self.message = "❌ Нет контейнеров для перехвата!"
+            self.message = "Нет контейнеров для перехвата"
             return False
         
         other['containers'].remove(last_bought['type'])
@@ -151,16 +203,16 @@ class ContainerGame:
         last_bought['buyer'] = player_id
         player['used_intercept'] = True
         
-        self.message = f"🦅 {player['name']} ПЕРЕХВАТИЛ контейнер!"
+        self.message = f"{player['name']} перехватил контейнер"
         return True
     
     def start_auction(self, container_id: int):
-        """Запускает аукцион, если на столе 1 контейнер и оба хотят его купить"""
         container = next((c for c in self.containers if c['id'] == container_id), None)
         if not container:
             return False
         
         self.auction_active = True
+        self.auction_start_time = time.time()
         self.auction_data = {
             'container_id': container_id,
             'current_price': container['price'],
@@ -169,132 +221,142 @@ class ContainerGame:
             'passed': [],
             'players_in': ['player1', 'player2']
         }
-        self.message = f"🔥 Начался аукцион! Старт: {container['price']} фишек"
+        self.message = f"Начался аукцион! Старт: {container['price']} фишек (40 секунд)"
         return True
     
     def auction_bid(self, player_id: str, action: str):
         if not self.auction_active:
-            self.message = "❌ Аукцион не активен!"
+            self.message = "Аукцион не активен"
             return False
         
         player = self.players[player_id]
         auction = self.auction_data
         
         if player_id in auction['passed']:
-            self.message = "❌ Вы уже пасовали!"
+            self.message = "Вы уже пасовали"
             return False
         
         container = next((c for c in self.containers if c['id'] == auction['container_id']), None)
         if not container or container['bought']:
-            self.message = "❌ Контейнер уже куплен!"
+            self.message = "Контейнер уже куплен"
             return False
+        
+        if time.time() - self.auction_start_time > AUCTION_TIMEOUT:
+            self.auction_active = False
+            if auction['current_bidder']:
+                winner_id = auction['current_bidder']
+                if self.buy_container(winner_id, container['id']):
+                    self.message = f"Время вышло! {self.players[winner_id]['name']} забирает контейнер за {auction['current_price']} фишек"
+                    self.check_round_end()
+            else:
+                container['bought'] = True
+                self.message = "Время аукциона вышло! Контейнер ушел в сброс"
+                self.check_round_end()
+            return True
         
         if action == 'raise':
             if auction['raise_count'] >= AUCTION_MAX_RAISES:
-                self.message = "❌ Достигнут лимит повышений (3)!"
+                self.message = "Достигнут лимит повышений (3)"
                 return False
             
             if player['chips'] < auction['current_price'] + AUCTION_STEP:
-                self.message = f"❌ Недостаточно фишек для повышения!"
+                self.message = f"Недостаточно фишек для повышения"
                 return False
             
             auction['current_price'] += AUCTION_STEP
             auction['raise_count'] += 1
             auction['current_bidder'] = player_id
             
-            self.message = f"⬆️ {player['name']} повысил до {auction['current_price']} фишек"
+            self.message = f"{player['name']} повысил до {auction['current_price']} фишек"
             
             if auction['raise_count'] >= AUCTION_MAX_RAISES:
-                # Автоматическая покупка после 3-го повышения
                 if self.buy_container(player_id, container['id']):
                     self.auction_active = False
-                    self.message = f"🏆 {player['name']} выиграл аукцион за {auction['current_price']} фишек!"
+                    self.message = f"{player['name']} выиграл аукцион за {auction['current_price']} фишек"
                     self.check_round_end()
             
             return True
             
         elif action == 'pass':
             auction['passed'].append(player_id)
-            self.message = f"🙅 {player['name']} пасует"
+            self.message = f"{player['name']} пасует"
             
             if len(auction['passed']) >= 2:
-                # Оба пасовали - контейнер уходит в сброс
                 self.auction_active = False
-                container['bought'] = True
-                self.message = "❌ Аукцион завершен без победителя! Контейнер ушел в сброс"
-                self.check_round_end()
+                if auction['current_bidder']:
+                    winner_id = auction['current_bidder']
+                    if self.buy_container(winner_id, container['id']):
+                        self.message = f"{self.players[winner_id]['name']} выиграл аукцион за {auction['current_price']} фишек"
+                        self.check_round_end()
+                else:
+                    container['bought'] = True
+                    self.message = "Аукцион завершен без победителя"
+                    self.check_round_end()
             
             return True
             
         elif action == 'buy':
             if player['chips'] < auction['current_price']:
-                self.message = f"❌ Недостаточно фишек! Нужно {auction['current_price']}"
+                self.message = f"Недостаточно фишек! Нужно {auction['current_price']}"
                 return False
             
             if self.buy_container(player_id, container['id']):
                 self.auction_active = False
-                self.message = f"✅ {player['name']} купил контейнер за {auction['current_price']} фишек!"
+                self.message = f"{player['name']} купил контейнер за {auction['current_price']} фишек"
                 self.check_round_end()
                 return True
         
         return False
     
     def check_round_end(self):
-        """Проверяет, закончился ли раунд"""
         available = self.get_available_containers()
         
-        # Все контейнеры куплены
         if not available:
             self.round_ended = True
             self.waiting_for_next_round = True
             if not self.game_over:
-                self.message = "✅ Все контейнеры куплены! Нажмите 'Следующий раунд'"
+                self.message = "Все контейнеры куплены! Нажмите 'Следующий раунд'"
             return True
         
-        # Таймаут
         if time.time() - self.round_start_time > ROUND_TIMEOUT:
             for c in available:
                 c['bought'] = True
             self.round_ended = True
             self.waiting_for_next_round = True
             if not self.game_over:
-                self.message = "⏰ Время вышло! Не купленные контейнеры ушли в сброс"
+                self.message = "Время вышло! Не купленные контейнеры ушли в сброс"
             return True
         
         return False
     
     def calculate_final_scores(self):
-        """Подсчитывает очки только в конце игры"""
         for player_id in self.players:
             player = self.players[player_id]
             player['score'] = sum(VALUES.get(c, 0) for c in player['containers'])
     
     def check_game_over(self):
-        """Проверяет, закончилась ли игра (только после 3 раундов)"""
         if self.current_round >= MAX_ROUNDS and self.waiting_for_next_round:
-            # Подсчитываем очки только сейчас!
             self.calculate_final_scores()
             
             p1 = self.players['player1']
             p2 = self.players['player2']
             
-            # Проверяем правило минимума
             if len(p1['containers']) < MIN_CONTAINERS:
                 self.winner = 'player2'
                 self.game_over = True
-                self.message = f"🏆 {p2['name']} победил! У {p1['name']} меньше 2 контейнеров!"
+                self.message = f"{p2['name']} победил! У {p1['name']} меньше 2 контейнеров"
             elif len(p2['containers']) < MIN_CONTAINERS:
                 self.winner = 'player1'
                 self.game_over = True
-                self.message = f"🏆 {p1['name']} победил! У {p2['name']} меньше 2 контейнеров!"
+                self.message = f"{p1['name']} победил! У {p2['name']} меньше 2 контейнеров"
             elif p1['score'] > p2['score']:
                 self.winner = 'player1'
                 self.game_over = True
-                self.message = f"🏆 {p1['name']} победил со счетом {p1['score']} против {p2['score']}!"
+                self.message = f"{p1['name']} победил со счетом {p1['score']} против {p2['score']}"
             elif p2['score'] > p1['score']:
                 self.winner = 'player2'
                 self.game_over = True
-                self.message = f"🏆 {p2['name']} победил со счетом {p2['score']} против {p1['score']}!"
+                self.message = f"{p2['name']} победил со счетом {p2['score']} против {p1['score']}"
             else:
                 if p1['chips'] > p2['chips']:
                     self.winner = 'player1'
@@ -303,7 +365,7 @@ class ContainerGame:
                 else:
                     self.winner = 'draw'
                 self.game_over = True
-                self.message = f"🤝 Ничья! {'Победа по фишкам!' if self.winner != 'draw' else 'Абсолютная ничья!'}"
+                self.message = f"Ничья! {'Победа по фишкам' if self.winner != 'draw' else 'Абсолютная ничья'}"
             
             self.final_results_shown = True
             return True
@@ -320,7 +382,7 @@ class ContainerGame:
         self.auction_active = False
         self.round_ended = False
         self.waiting_for_next_round = False
-        self.message = f"🔄 Раунд {self.current_round} начался!"
+        self.message = f"Раунд {self.current_round} начался"
 
 # ---------------------------
 # 3. SOCKET.IO ОБРАБОТЧИКИ
@@ -360,24 +422,22 @@ def handle_join_game(data):
     
     game = games[game_id]
     
-    if player_id == 'player1' and not game.players_connected['player1']:
+    if player_id == 'player1' and game.players_connected['player1']:
+        emit('error', {'message': 'Игрок 1 уже подключен'})
+        return
+    elif player_id == 'player2' and game.players_connected['player2']:
+        emit('error', {'message': 'Игрок 2 уже подключен'})
+        return
+    
+    if player_id == 'player1':
         game.players['player1']['sid'] = request.sid
         game.players_connected['player1'] = True
-    elif player_id == 'player2' and not game.players_connected['player2']:
+    elif player_id == 'player2':
         game.players['player2']['sid'] = request.sid
         game.players_connected['player2'] = True
     else:
-        if not game.players_connected['player1']:
-            game.players['player1']['sid'] = request.sid
-            game.players_connected['player1'] = True
-            player_id = 'player1'
-        elif not game.players_connected['player2']:
-            game.players['player2']['sid'] = request.sid
-            game.players_connected['player2'] = True
-            player_id = 'player2'
-        else:
-            emit('error', {'message': 'Игра полна!'})
-            return
+        emit('error', {'message': 'Неверный ID игрока'})
+        return
     
     emit('player_assigned', {
         'player_id': player_id,
@@ -387,7 +447,7 @@ def handle_join_game(data):
     send_game_state(game_id)
     
     if game.players_connected['player1'] and game.players_connected['player2']:
-        emit('game_ready', {'message': 'Оба игрока подключены! Начинаем!'}, room=game_id)
+        emit('game_ready', {'message': 'Оба игрока подключены! Начинаем'}, room=game_id)
 
 @socketio.on('start_game')
 def handle_start_game(data):
@@ -401,7 +461,7 @@ def handle_start_game(data):
         game.next_round()
         send_game_state(game_id)
     else:
-        emit('error', {'message': 'Оба игрока должны быть подключены!'})
+        emit('error', {'message': 'Оба игрока должны быть подключены'})
 
 @socketio.on('buy_container')
 def handle_buy_container(data):
@@ -413,7 +473,12 @@ def handle_buy_container(data):
     player_id = data.get('player_id')
     container_id = data.get('container_id')
     
-    if not game.started or game.game_over:
+    if not game.started:
+        emit('error', {'message': 'Игра еще не началась'})
+        return
+    
+    if game.game_over:
+        emit('error', {'message': 'Игра уже закончена'})
         return
     
     if game.auction_active:
@@ -422,12 +487,12 @@ def handle_buy_container(data):
     
     container = next((c for c in game.containers if c['id'] == container_id and not c['bought']), None)
     if container:
-        game.buy_container(player_id, container_id)
-        emit('purchase_result', {
-            'container_id': container_id,
-            'type': container['type'],
-            'value': container['value']
-        }, room=request.sid)
+        if game.buy_container(player_id, container_id):
+            emit('purchase_result', {
+                'container_id': container_id,
+                'type': container['type'],
+                'value': container['value']
+            }, room=request.sid)
     
     game.check_round_end()
     send_game_state(game_id)
@@ -442,7 +507,12 @@ def handle_use_xray(data):
     player_id = data.get('player_id')
     container_id = data.get('container_id')
     
-    if not game.started or game.game_over:
+    if not game.started:
+        emit('error', {'message': 'Игра еще не началась'})
+        return
+    
+    if game.game_over:
+        emit('error', {'message': 'Игра уже закончена'})
         return
     
     result = game.use_xray(player_id, container_id)
@@ -465,10 +535,14 @@ def handle_use_intercept(data):
     game = games[game_id]
     player_id = data.get('player_id')
     
-    if not game.started or game.game_over:
+    if not game.started:
+        emit('error', {'message': 'Игра еще не началась'})
         return
     
-    # Находим последний купленный контейнер для перехвата
+    if game.game_over:
+        emit('error', {'message': 'Игра уже закончена'})
+        return
+    
     other_id = 'player2' if player_id == 'player1' else 'player1'
     last_bought = None
     for c in reversed(game.containers):
@@ -477,12 +551,12 @@ def handle_use_intercept(data):
             break
     
     if last_bought:
-        game.use_intercept(player_id)
-        emit('intercept_result', {
-            'container_id': last_bought['id'],
-            'type': last_bought['type'],
-            'value': last_bought['value']
-        }, room=request.sid)
+        if game.use_intercept(player_id):
+            emit('intercept_result', {
+                'container_id': last_bought['id'],
+                'type': last_bought['type'],
+                'value': last_bought['value']
+            }, room=request.sid)
     
     send_game_state(game_id)
 
@@ -496,15 +570,22 @@ def handle_auction_bid(data):
     player_id = data.get('player_id')
     action = data.get('action')
     
-    if not game.started or game.game_over:
+    if not game.started:
+        emit('error', {'message': 'Игра еще не началась'})
         return
     
-    # Сохраняем ID контейнера до завершения аукциона
+    if game.game_over:
+        emit('error', {'message': 'Игра уже закончена'})
+        return
+    
+    if not game.auction_active:
+        emit('error', {'message': 'Аукцион не активен'})
+        return
+    
     container_id = game.auction_data.get('container_id') if game.auction_active else None
     
     game.auction_bid(player_id, action)
     
-    # Если аукцион завершился и кто-то купил контейнер
     if not game.auction_active and container_id:
         container = next((c for c in game.containers if c['id'] == container_id), None)
         if container and container['bought']:
@@ -525,11 +606,14 @@ def handle_next_round(data):
     game = games[game_id]
     
     if game.game_over:
+        emit('error', {'message': 'Игра уже закончена'})
         return
     
     if game.waiting_for_next_round:
         game.next_round()
         send_game_state(game_id)
+    else:
+        emit('error', {'message': 'Раунд еще не закончен'})
 
 @socketio.on('reset_game')
 def handle_reset_game(data):
@@ -551,7 +635,6 @@ def send_game_state(game_id):
     
     game = games[game_id]
     
-    # Проверяем окончание игры только если прошло 3 раунда
     if game.current_round >= MAX_ROUNDS and game.waiting_for_next_round:
         game.check_game_over()
     
@@ -570,7 +653,6 @@ def send_game_state(game_id):
         'containers': []
     }
     
-    # Данные игроков
     for player_id, player_data in game.players.items():
         state['players'][player_id] = {
             'name': player_data['name'],
@@ -581,13 +663,11 @@ def send_game_state(game_id):
             'used_intercept': player_data['used_intercept'],
             'connected': game.players_connected[player_id]
         }
-        # Очки показываем ТОЛЬКО если игра окончена
         if game.game_over:
             state['players'][player_id]['score'] = player_data['score']
         else:
-            state['players'][player_id]['score'] = None  # Скрываем очки
+            state['players'][player_id]['score'] = None
     
-    # Контейнеры на столе - показываем ТОЛЬКО доступные для покупки
     for c in game.containers:
         if not c['bought']:
             state['containers'].append({
