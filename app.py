@@ -458,6 +458,15 @@ def handle_next_round(data):
         game.next_round()
         send_game_state(game_id)
 
+@socketio.on('reset_game')
+def handle_reset_game(data):
+    game_id = game_players.get(request.sid)
+    if not game_id or game_id not in games:
+        return
+    
+    games[game_id] = ContainerGame()
+    send_game_state(game_id)
+
 def send_game_state(game_id):
     if game_id not in games:
         return
@@ -478,28 +487,39 @@ def send_game_state(game_id):
         'players': {}
     }
     
+    # Отправляем данные игроков - показываем ТОЛЬКО свои контейнеры
     for player_id, player_data in game.players.items():
+        # Для каждого игрока отправляем его контейнеры, а контейнеры соперника скрываем
         state['players'][player_id] = {
             'name': player_data['name'],
             'chips': player_data['chips'],
             'score': player_data['score'],
-            'containers': player_data['containers'],
+            'containers': player_data['containers'],  # только свои контейнеры
             'containers_count': len(player_data['containers']),
             'used_xray': player_data['used_xray'],
             'used_intercept': player_data['used_intercept'],
             'connected': game.players_connected[player_id]
         }
     
+    # Контейнеры на столе - скрываем содержимое
     state['containers'] = []
     for c in game.containers:
-        state['containers'].append({
+        container_data = {
             'id': c['id'],
             'price': c['price'],
             'bought': c['bought'],
             'buyer': c['buyer'],
-            'type': c['type'] if c['bought'] else None,
-            'value': c['value'] if c['bought'] else None
-        })
+        }
+        # Показываем тип и ценность только если контейнер куплен И это контейнер текущего игрока
+        # В общем состоянии показываем только факт покупки
+        if c['bought']:
+            container_data['type'] = c['type']
+            container_data['value'] = c['value']
+        else:
+            container_data['type'] = None
+            container_data['value'] = None
+        
+        state['containers'].append(container_data)
     
     if game.auction_active:
         state['auction'] = {
