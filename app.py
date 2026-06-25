@@ -1,15 +1,17 @@
-# app.py - сохраните этот файл
+# app.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import streamlit as st
 import random
 import time
 from typing import List, Tuple, Optional, Dict
 import pandas as pd
-from streamlit.components.v1 import html
 
 # ---------------------------
 # 1. ИГРОВЫЕ КОНСТАНТЫ
 # ---------------------------
+
+# СЛОВАРЬ ЗНАЧЕНИЙ ДОЛЖЕН БЫТЬ ОПРЕДЕЛЕН ДО ИСПОЛЬЗОВАНИЯ!
+VALUES = {"Яхта": 200, "Дом": 100, "Мебель": 40, "Велосипед": -20}
 
 MAX_ROUNDS = 3
 MIN_CONTAINERS = 2
@@ -71,7 +73,7 @@ class GameState:
                 'id': len(containers),
                 'type': c_type,
                 'price': price,
-                'value': VALUES.get(c_type, 0),
+                'value': VALUES.get(c_type, 0),  # VALUES уже определена
                 'bought': False,
                 'buyer': None
             })
@@ -317,8 +319,6 @@ def init_session_state():
         st.session_state.player_id = None
     if 'game_started' not in st.session_state:
         st.session_state.game_started = False
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
 
 def get_emoji(container_type: str) -> str:
     emojis = {"Яхта": "⛵", "Дом": "🏠", "Мебель": "🪑", "Велосипед": "🚲"}
@@ -363,10 +363,27 @@ def main():
             color: #999;
             font-style: italic;
         }
+        .auction-box {
+            border: 2px solid #ff6b6b;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            background: #fff3f3;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0); }
+        }
+        .stButton button {
+            width: 100%;
+        }
         </style>
     """, unsafe_allow_html=True)
     
     st.title("🎮 Контейнеры - Веб-игра")
+    st.caption("Играйте с другом с двух устройств!")
     
     # Выбор игрока
     col1, col2 = st.columns([1, 2])
@@ -374,6 +391,7 @@ def main():
     with col1:
         if not st.session_state.player_id:
             st.subheader("👤 Выберите игрока")
+            st.info("Игрок 1 и Игрок 2 должны выбрать свои роли на разных устройствах")
             
             if st.button("🎮 Игрок 1", use_container_width=True):
                 st.session_state.player_id = 'player1'
@@ -384,22 +402,50 @@ def main():
                 st.rerun()
         else:
             player = game.players[st.session_state.player_id]
-            st.success(f"Вы играете как: {player['name']}")
+            st.success(f"✅ Вы играете как: {player['name']}")
             
-            if st.button("🔄 Сменить игрока"):
+            if st.button("🔄 Сменить игрока", use_container_width=True):
                 st.session_state.player_id = None
                 st.rerun()
     
     with col2:
         if not st.session_state.game_started:
-            if st.button("🚀 Начать новую игру", use_container_width=True):
+            if st.button("🚀 Начать новую игру", use_container_width=True, type="primary"):
                 game.reset()
                 game.next_round()
                 st.session_state.game_started = True
                 st.rerun()
+            st.caption("Нажмите после того, как оба игрока выбрали роли")
     
     if not st.session_state.game_started:
-        st.info("👆 Нажмите 'Начать новую игру' и выберите игрока!")
+        st.info("👆 Нажмите 'Начать новую игру' когда оба игрока готовы!")
+        
+        # Показываем правила
+        with st.expander("📖 Правила игры", expanded=True):
+            st.markdown("""
+            **Правила игры «Контейнеры»:**
+            
+            - 🎯 **Цель:** набрать максимальное количество очков из контейнеров
+            - 📦 **Минимум:** нужно иметь как минимум 2 контейнера к концу игры
+            - 🔄 **Раунды:** игра длится 3 раунда
+            - ⏱️ **Таймаут:** 30 секунд на раунд
+            - 💰 **Капитал:** у каждого 150 фишек
+            
+            **Контейнеры:**
+            - Генерируются от 1 до 5 контейнеров за раунд
+            - Цена случайная (5-65 фишек) - не зависит от содержимого!
+            - Содержимое узнается ТОЛЬКО после покупки
+            
+            **Дополнительные действия (1 раз за игру):**
+            - 🔍 **Рентген:** посмотреть содержимое контейнера до покупки
+            - 🦅 **Перехват:** забрать последний купленный контейнер у соперника
+            
+            **Аукцион:**
+            - Если выпал 1 контейнер, и оба хотят его купить
+            - Можно повышать ставку (шаг 10 фишек)
+            - Максимум 3 повышения
+            - Победитель забирает контейнер по финальной цене
+            """)
         return
     
     if st.session_state.player_id:
@@ -408,121 +454,158 @@ def main():
         other_player = game.players[other_id]
         
         # Основная информация
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns([1, 1.5, 1])
         
         with col1:
-            st.subheader("📊 Статус игры")
+            st.subheader("📊 Статус")
             st.metric("Раунд", f"{game.current_round}/{MAX_ROUNDS}")
-            st.metric("Осталось контейнеров", len(game.get_available_containers()))
-            st.info(game.message)
+            st.metric("📦 Контейнеров на столе", len(game.get_available_containers()))
+            if game.message:
+                st.info(game.message)
         
         with col2:
-            st.subheader(f"👤 {current_player['name']}")
-            st.metric("💰 Фишки", current_player['chips'])
-            st.metric("⭐ Очки", current_player['score'])
-            st.metric("📦 Контейнеров", len(current_player['containers']))
+            st.subheader(f"👤 {current_player['name']} (ВЫ)")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("💰 Фишки", current_player['chips'])
+            with col_b:
+                st.metric("⭐ Очки", current_player['score'])
+            with col_c:
+                st.metric("📦 Контейнеров", len(current_player['containers']))
             
             if current_player['containers']:
-                st.write("Ваши контейнеры:")
+                st.write("**Ваши контейнеры:**")
                 for c in current_player['containers']:
                     st.write(f"{get_emoji(c)} {c} (+{VALUES.get(c, 0)})")
             else:
-                st.write("Пока нет контейнеров")
+                st.write("*Пока нет контейнеров*")
+            
+            # Статус способностей
+            st.write("**Способности:**")
+            st.write(f"🔍 Рентген: {'✅ использован' if current_player['used_xray'] else '❌ доступен'}")
+            st.write(f"🦅 Перехват: {'✅ использован' if current_player['used_intercept'] else '❌ доступен'}")
         
         with col3:
             st.subheader(f"🤖 {other_player['name']}")
-            st.metric("💰 Фишки", other_player['chips'])
-            st.metric("⭐ Очки", other_player['score'])
-            st.metric("📦 Контейнеров", len(other_player['containers']))
-            st.write(f"Контейнеры: {len(other_player['containers'])} шт.")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("💰 Фишки", other_player['chips'])
+            with col_b:
+                st.metric("⭐ Очки", other_player['score'])
+            with col_c:
+                st.metric("📦 Контейнеров", len(other_player['containers']))
+            
+            if other_player['containers']:
+                st.write("**Контейнеры соперника:**")
+                for c in other_player['containers']:
+                    st.write(f"{get_emoji(c)} {c} (+{VALUES.get(c, 0)})")
+            else:
+                st.write("*У соперника пока нет контейнеров*")
         
         # Действия
+        st.divider()
         st.subheader("🎯 Ваши действия")
         
         if not game.game_over and game.current_round <= MAX_ROUNDS:
             available = game.get_available_containers()
             
-            col1, col2 = st.columns([2, 1])
+            if game.auction_active:
+                # Аукцион
+                st.markdown("""
+                <div class="auction-box">
+                    <h3>🔥 ИДЕТ АУКЦИОН!</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                auction = game.auction_data
+                container = next((c for c in game.containers if c['id'] == auction['container_id']), None)
+                
+                if container:
+                    st.write(f"**📦 Контейнер:** ❓ (содержимое скрыто)")
+                    st.write(f"**💰 Текущая ставка:** {auction['current_price']} фишек")
+                    st.write(f"**🔄 Повышений:** {auction['raise_count']}/{AUCTION_MAX_RAISES}")
+                    
+                    if st.session_state.player_id not in auction['passed']:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if st.button("⬆️ Повысить", use_container_width=True):
+                                game.auction_bid(st.session_state.player_id, 'raise')
+                                st.rerun()
+                        with col2:
+                            if st.button("🙅 Пас", use_container_width=True):
+                                game.auction_bid(st.session_state.player_id, 'pass')
+                                st.rerun()
+                        with col3:
+                            if st.button("💰 Купить сейчас", use_container_width=True):
+                                game.auction_bid(st.session_state.player_id, 'buy')
+                                st.rerun()
+                    else:
+                        st.warning("Вы уже пасовали в этом аукционе")
+            
+            elif available:
+                st.write("📦 **Доступные контейнеры (содержимое неизвестно!):**")
+                
+                # Показываем контейнеры в сетке
+                cols = st.columns(min(3, len(available)))
+                for idx, container in enumerate(available):
+                    col = cols[idx % 3]
+                    with col:
+                        with st.container():
+                            st.markdown(f"""
+                            <div style='border: 2px solid #ddd; border-radius: 10px; padding: 15px; margin: 5px; text-align: center; background: white;'>
+                                <div style='font-size: 40px;'>❓</div>
+                                <div style='font-size: 20px; font-weight: bold;'>💰 {container['price']} фишек</div>
+                                <div style='font-size: 12px; color: #888;'>Содержимое скрыто 🔒</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                if st.button(f"💰 Купить", key=f"buy_{container['id']}", use_container_width=True):
+                                    game.buy_container(st.session_state.player_id, container['id'])
+                                    st.rerun()
+                            with btn_col2:
+                                if st.button(f"🔍 Рентген", key=f"xray_{container['id']}", use_container_width=True, 
+                                           disabled=current_player['used_xray']):
+                                    game.use_xray(st.session_state.player_id, container['id'])
+                                    st.rerun()
+            else:
+                st.info("✅ Все контейнеры куплены!")
+            
+            # Дополнительные действия
+            st.divider()
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                if available:
-                    st.write("📦 Доступные контейнеры (содержимое неизвестно!):")
-                    
-                    cols = st.columns(min(3, len(available)))
-                    for idx, container in enumerate(available):
-                        col = cols[idx % 3]
-                        with col:
-                            with st.container():
-                                st.markdown(f"""
-                                <div style='border: 1px solid #ddd; padding: 10px; border-radius: 10px; margin: 5px; text-align: center;'>
-                                    <div style='font-size: 30px;'>❓</div>
-                                    <div><strong>Цена:</strong> {container['price']} 💰</div>
-                                    <div style='font-size: 12px; color: #888;'>Содержимое скрыто</div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                # Кнопки действий
-                                btn_col1, btn_col2 = st.columns(2)
-                                
-                                with btn_col1:
-                                    if st.button(f"💰 Купить", key=f"buy_{container['id']}", use_container_width=True):
-                                        if game.auction_active:
-                                            st.warning("⚠️ Идет аукцион!")
-                                        else:
-                                            game.buy_container(st.session_state.player_id, container['id'])
-                                            st.rerun()
-                                
-                                with btn_col2:
-                                    if st.button(f"🔍 Рентген", key=f"xray_{container['id']}", use_container_width=True):
-                                        game.use_xray(st.session_state.player_id, container['id'])
-                                        st.rerun()
-                else:
-                    st.info("Все контейнеры куплены!")
-            
-            with col2:
-                st.write("⚡ Дополнительные действия:")
-                
                 if st.button("🦅 Перехват", use_container_width=True, disabled=current_player['used_intercept']):
                     game.use_intercept(st.session_state.player_id)
                     st.rerun()
-                
+            
+            with col2:
                 if st.button("⏭️ Пропустить ход", use_container_width=True):
                     game.message = f"{current_player['name']} пропустил ход"
                     st.rerun()
-                
-                st.write("---")
-                st.write("💡 Советы:")
-                st.write("• Используйте РЕНТГЕН, чтобы увидеть содержимое")
-                st.write("• ПЕРЕХВАТ забирает последний купленный контейнер")
-                st.write("• Каждую способность можно использовать 1 раз за игру")
-        
-        # Аукцион
-        if game.auction_active:
-            st.warning("🔥 Идет аукцион!")
-            auction = game.auction_data
-            container = next((c for c in game.containers if c['id'] == auction['container_id']), None)
             
-            if container and st.session_state.player_id not in auction['passed']:
-                st.write(f"**Текущая ставка:** {auction['current_price']} фишек")
-                st.write(f"**Повышений:** {auction['raise_count']}/{AUCTION_MAX_RAISES}")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("⬆️ Повысить", use_container_width=True):
-                        game.auction_bid(st.session_state.player_id, 'raise')
-                        st.rerun()
-                with col2:
-                    if st.button("🙅 Пас", use_container_width=True):
-                        game.auction_bid(st.session_state.player_id, 'pass')
-                        st.rerun()
-                with col3:
-                    if st.button("💰 Купить сейчас", use_container_width=True):
-                        game.auction_bid(st.session_state.player_id, 'buy')
-                        st.rerun()
+            with col3:
+                # Принудительное завершение раунда (для тестирования)
+                if st.button("⏰ Завершить раунд", use_container_width=True):
+                    available_containers = game.get_available_containers()
+                    for c in available_containers:
+                        c['bought'] = True
+                    game.message = "⏰ Раунд принудительно завершен!"
+                    st.rerun()
+            
+            # Таймер
+            if not game.game_over:
+                elapsed = time.time() - game.round_start_time
+                remaining = max(0, ROUND_TIMEOUT - elapsed)
+                st.progress(remaining / ROUND_TIMEOUT)
+                st.caption(f"⏱️ Осталось времени: {int(remaining)} секунд")
         
         # Завершение раунда
-        if game.check_round_end() and not game.game_over:
-            if st.button("➡️ Следующий раунд"):
+        if game.check_round_end() and not game.game_over and game.current_round < MAX_ROUNDS:
+            st.divider()
+            if st.button("➡️ Следующий раунд", use_container_width=True, type="primary"):
                 game.next_round()
                 st.rerun()
         
@@ -531,28 +614,38 @@ def main():
             st.balloons()
             st.success(game.message)
             
-            # Финальная статистика
-            p1 = game.players['player1']
-            p2 = game.players['player2']
+            st.divider()
+            st.subheader("🏆 ФИНАЛЬНЫЕ РЕЗУЛЬТАТЫ")
             
             col1, col2 = st.columns(2)
             with col1:
-                st.subheader(f"🏆 {p1['name']}")
-                st.write(f"Контейнеров: {len(p1['containers'])}")
-                st.write(f"Очки: {p1['score']}")
-                st.write(f"Фишки: {p1['chips']}")
-                st.write(f"Контейнеры: {', '.join(p1['containers']) if p1['containers'] else 'нет'}")
+                p1 = game.players['player1']
+                st.markdown(f"""
+                <div style='border: 2px solid #4CAF50; border-radius: 10px; padding: 15px;'>
+                    <h3>👤 {p1['name']}</h3>
+                    <p>📦 Контейнеров: {len(p1['containers'])}</p>
+                    <p>⭐ Очки: {p1['score']}</p>
+                    <p>💰 Фишки: {p1['chips']}</p>
+                    <p>📦 Контейнеры: {', '.join(p1['containers']) if p1['containers'] else 'нет'}</p>
+                </div>
+                """, unsafe_allow_html=True)
             
             with col2:
-                st.subheader(f"🏆 {p2['name']}")
-                st.write(f"Контейнеров: {len(p2['containers'])}")
-                st.write(f"Очки: {p2['score']}")
-                st.write(f"Фишки: {p2['chips']}")
-                st.write(f"Контейнеры: {', '.join(p2['containers']) if p2['containers'] else 'нет'}")
+                p2 = game.players['player2']
+                st.markdown(f"""
+                <div style='border: 2px solid #4CAF50; border-radius: 10px; padding: 15px;'>
+                    <h3>👤 {p2['name']}</h3>
+                    <p>📦 Контейнеров: {len(p2['containers'])}</p>
+                    <p>⭐ Очки: {p2['score']}</p>
+                    <p>💰 Фишки: {p2['chips']}</p>
+                    <p>📦 Контейнеры: {', '.join(p2['containers']) if p2['containers'] else 'нет'}</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            if st.button("🔄 Новая игра"):
+            if st.button("🔄 Новая игра", use_container_width=True, type="primary"):
                 game.reset()
-                game.next_round()
+                st.session_state.game_started = False
+                st.session_state.player_id = None
                 st.rerun()
 
 # ---------------------------
