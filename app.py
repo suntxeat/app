@@ -12,7 +12,6 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 # 1. ИГРОВЫЕ КОНСТАНТЫ
 # ---------------------------
 
-# 30+ разных предметов с разной стоимостью
 ITEMS = {
     "Алмаз": 500,
     "Золотой слиток": 400,
@@ -54,7 +53,6 @@ ITEMS = {
     "Ожерелье": 110
 }
 
-# Создаем пул предметов
 POOL = []
 for item, value in ITEMS.items():
     count = 2 if random.random() > 0.6 else 1
@@ -145,13 +143,14 @@ class ContainerGame:
         container = next((c for c in self.containers if c['id'] == container_id and not c['bought']), None)
         
         if not container:
-            self.message = "Ошибка: контейнер уже куплен"
+            self.message = "Контейнер уже куплен"
             return False
         
         if player['chips'] < container['price']:
             self.message = f"Недостаточно фишек! Нужно {container['price']}, есть {player['chips']}"
             return False
         
+        # ✅ СПИСЫВАЕМ ФИШКИ
         player['chips'] -= container['price']
         player['containers'].append(container['type'])
         container['bought'] = True
@@ -186,6 +185,7 @@ class ContainerGame:
             self.message = "Перехват уже использован"
             return False
         
+        # Ищем последний купленный контейнер другим игроком
         last_bought = None
         for c in reversed(self.containers):
             if c['bought'] and c['buyer'] == other_id:
@@ -196,10 +196,14 @@ class ContainerGame:
             self.message = "Нет контейнеров для перехвата"
             return False
         
+        # ✅ ПЕРЕХВАТ: забираем контейнер, фишки возвращаем
+        # 1. Удаляем контейнер у другого игрока
         other['containers'].remove(last_bought['type'])
+        # 2. Возвращаем фишки другому игроку
         other['chips'] += last_bought['price']
-        
+        # 3. Добавляем контейнер перехватившему
         player['containers'].append(last_bought['type'])
+        # 4. Меняем владельца
         last_bought['buyer'] = player_id
         player['used_intercept'] = True
         
@@ -241,6 +245,7 @@ class ContainerGame:
             self.message = "Контейнер уже куплен"
             return False
         
+        # Проверяем таймаут аукциона (40 секунд)
         if time.time() - self.auction_start_time > AUCTION_TIMEOUT:
             self.auction_active = False
             if auction['current_bidder']:
@@ -543,6 +548,7 @@ def handle_use_intercept(data):
         emit('error', {'message': 'Игра уже закончена'})
         return
     
+    # Сохраняем информацию до перехвата
     other_id = 'player2' if player_id == 'player1' else 'player1'
     last_bought = None
     for c in reversed(game.containers):
@@ -653,6 +659,7 @@ def send_game_state(game_id):
         'containers': []
     }
     
+    # Отправляем данные игроков
     for player_id, player_data in game.players.items():
         state['players'][player_id] = {
             'name': player_data['name'],
@@ -668,6 +675,7 @@ def send_game_state(game_id):
         else:
             state['players'][player_id]['score'] = None
     
+    # Отправляем доступные контейнеры
     for c in game.containers:
         if not c['bought']:
             state['containers'].append({
