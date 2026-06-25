@@ -267,6 +267,10 @@
             border-radius: 10px;
         }
         
+        .game-over .result-player h3 {
+            margin-bottom: 10px;
+        }
+        
         .join-screen {
             text-align: center;
             padding: 40px;
@@ -284,14 +288,10 @@
             font-size: 0.9em;
         }
         
-        .reveal-animation {
-            animation: reveal 0.5s ease-in-out;
-        }
-        
-        @keyframes reveal {
-            0% { transform: scale(0.8); opacity: 0; }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); opacity: 1; }
+        .container-count {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
         }
         
         @media (max-width: 768px) {
@@ -364,7 +364,7 @@
                             </div>
                             <div class="stat">
                                 <div class="label">⭐ Очки</div>
-                                <div class="value" id="p1Score">?</div>
+                                <div class="value hidden-score" id="p1Score">?</div>
                             </div>
                             <div class="stat">
                                 <div class="label">📦 Контейнеры</div>
@@ -387,7 +387,7 @@
                             </div>
                             <div class="stat">
                                 <div class="label">⭐ Очки</div>
-                                <div class="value" id="p2Score">?</div>
+                                <div class="value hidden-score" id="p2Score">?</div>
                             </div>
                             <div class="stat">
                                 <div class="label">📦 Контейнеры</div>
@@ -414,7 +414,7 @@
                         <h3>🔥 АУКЦИОН!</h3>
                         <div id="auctionInfo"></div>
                         <div class="btn-group">
-                            <button class="btn btn-warning" onclick="auctionAction('raise')">⬆️ Повысить</button>
+                            <button class="btn btn-warning" onclick="auctionAction('raise')">⬆️ Повысить (+10)</button>
                             <button class="btn btn-danger" onclick="auctionAction('pass')">🙅 Пас</button>
                             <button class="btn btn-success" onclick="auctionAction('buy')">💰 Купить сейчас</button>
                         </div>
@@ -497,7 +497,6 @@
             
             socket.on('purchase_result', function(data) {
                 showMessage('success', `✅ Вы купили контейнер! Внутри: ${data.type} (+${data.value} очков)`);
-                // Добавляем в свои контейнеры
                 myContainers.push(data.type);
                 updateMyContainers();
             });
@@ -528,7 +527,6 @@
         }
         
         function updateMyContainers() {
-            // Обновляем отображение своих контейнеров
             const prefix = playerId === 'player1' ? 'p1' : 'p2';
             const list = document.getElementById(prefix + 'ContainersList');
             list.innerHTML = '';
@@ -636,9 +634,13 @@
             
             // Очки показываем как "?" если игра не окончена
             if (gameState && gameState.game_over) {
-                document.getElementById(prefix + 'Score').textContent = data.score;
+                const scoreEl = document.getElementById(prefix + 'Score');
+                scoreEl.textContent = data.score;
+                scoreEl.className = 'value';
             } else {
-                document.getElementById(prefix + 'Score').textContent = '?';
+                const scoreEl = document.getElementById(prefix + 'Score');
+                scoreEl.textContent = '?';
+                scoreEl.className = 'value hidden-score';
             }
             
             document.getElementById(prefix + 'Containers').textContent = data.containers_count;
@@ -648,7 +650,6 @@
             list.innerHTML = '';
             
             if (isYou) {
-                // Свои контейнеры - обновляем из myContainers
                 if (myContainers.length === 0) {
                     const span = document.createElement('span');
                     span.className = 'empty-message';
@@ -663,7 +664,6 @@
                     });
                 }
             } else {
-                // Чужие контейнеры СКРЫВАЕМ
                 if (data.containers_count > 0) {
                     const tag = document.createElement('span');
                     tag.className = 'container-tag hidden';
