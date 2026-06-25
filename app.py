@@ -3,6 +3,7 @@ from flask_socketio import SocketIO, emit, join_room
 import random
 import time
 import os
+import threading
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
@@ -38,42 +39,42 @@ ROUND_TIMEOUT = 30
 AUCTION_TIMEOUT = 40
 
 # ---------------------------
-# 2. УПРАВЛЕНИЕ ИГРАМИ
+# 2. КЛАСС ИГРЫ
 # ---------------------------
 
 games = {}
 game_players = {}
 
-class ContainerGame:
+class Game:
     def __init__(self):
         self.reset()
     
     def reset(self):
         self.pool = self.create_pool()
-        self.current_round = 0
+        self.round = 0
         self.players = {
-            'player1': {'name': 'Игрок 1', 'chips': 150, 'containers': [], 'score': 0, 
-                       'used_xray': False, 'used_intercept': False, 'sid': None},
-            'player2': {'name': 'Игрок 2', 'chips': 150, 'containers': [], 'score': 0,
-                       'used_xray': False, 'used_intercept': False, 'sid': None}
+            'p1': {'name': 'Игрок 1', 'chips': 150, 'containers': [], 'score': 0, 
+                   'xray': False, 'intercept': False, 'sid': None},
+            'p2': {'name': 'Игрок 2', 'chips': 150, 'containers': [], 'score': 0,
+                   'xray': False, 'intercept': False, 'sid': None}
         }
         self.containers = []
-        self.auction_active = False
-        self.auction_data = {}
+        self.auction = None
         self.game_over = False
         self.winner = None
         self.message = "Добро пожаловать!"
-        self.round_start_time = 0
-        self.auction_start_time = 0
         self.started = False
-        self.players_connected = {'player1': False, 'player2': False}
-        self.round_ended = False
-        self.waiting_for_next = False
-        self.timer_running = False
+        self.connected = {'p1': False, 'p2': False}
+        self.round_done = False
+        self.waiting = False
+        self.round_start = 0
+        self.auction_start = 0
+        self.timer_thread = None
+        self.running = True
         
     def create_pool(self):
         pool = []
-        for item, value in ITEMS.items():
+        for item, val in ITEMS.items():
             count = 2 if random.random() > 0.6 else 1
             pool.extend([item] * count)
         random.shuffle(pool)
@@ -83,19 +84,20 @@ class ContainerGame:
         if not self.pool:
             self.pool = self.create_pool()
         
-        count = random.randint(1, min(5, len(self.pool)))
+        count = random.randint(1, 5)
+        count = min(count, len(self.pool))
         containers = []
         
-        for _ in range(count):
+        for i in range(count):
             if not self.pool:
                 break
-            c_type = self.pool.pop()
+            item = self.pool.pop()
             price = random.randint(5, 80)
             containers.append({
-                'id': len(containers),
-                'type': c_type,
+                'id': i,
+                'item': item,
                 'price': price,
-                'value': VALUES.get(c_type, 0),
+                'value': VALUES.get(item, 0),
                 'bought': False,
                 'buyer': None
             })
@@ -104,238 +106,230 @@ class ContainerGame:
     def get_available(self):
         return [c for c in self.containers if not c['bought']]
     
-    def buy_container(self, player_id, container_id):
-        player = self.players[player_id]
-        container = next((c for c in self.containers if c['id'] == container_id and not c['bought']), None)
+    def buy(self, pid, cid):
+        player = self.players[pid]
+        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
         
         if not container:
             self.message = "Контейнер уже куплен"
             return False
         
         if player['chips'] < container['price']:
-            self.message = f"Недостаточно фишек! Нужно {container['price']}"
+            self.message = f"Не хватает фишек! Нужно {container['price']}"
             return False
         
         player['chips'] -= container['price']
-        player['containers'].append(container['type'])
+        player['containers'].append(container['item'])
         container['bought'] = True
-        container['buyer'] = player_id
+        container['buyer'] = pid
         
         self.message = f"{player['name']} купил контейнер"
         return True
     
-    def use_xray(self, player_id, container_id):
-        player = self.players[player_id]
+    def xray(self, pid, cid):
+        player = self.players[pid]
         
-        if player['used_xray']:
+        if player['xray']:
             self.message = "Рентген уже использован"
             return None
         
-        container = next((c for c in self.containers if c['id'] == container_id and not c['bought']), None)
+        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
         if not container:
             self.message = "Контейнер не найден"
             return None
         
-        player['used_xray'] = True
+        player['xray'] = True
         self.message = f"{player['name']} использовал рентген"
-        return container['type']
+        return container['item']
     
-    def use_intercept(self, player_id):
-        player = self.players[player_id]
-        other_id = 'player2' if player_id == 'player1' else 'player1'
-        other = self.players[other_id]
+    def intercept(self, pid):
+        player = self.players[pid]
+        other = 'p2' if pid == 'p1' else 'p1'
+        other_player = self.players[other]
         
-        if player['used_intercept']:
+        if player['intercept']:
             self.message = "Перехват уже использован"
             return False
         
-        # Ищем последний купленный контейнер соперника
-        last_bought = None
+        # Ищем последний купленный контейнер
+        last = None
         for c in reversed(self.containers):
-            if c['bought'] and c['buyer'] == other_id:
-                last_bought = c
+            if c['bought'] and c['buyer'] == other:
+                last = c
                 break
         
-        if not last_bought:
+        if not last:
             self.message = "Нет контейнеров для перехвата"
             return False
         
         # Перехват
-        other['containers'].remove(last_bought['type'])
-        other['chips'] += last_bought['price']
-        player['containers'].append(last_bought['type'])
-        last_bought['buyer'] = player_id
-        player['used_intercept'] = True
+        other_player['containers'].remove(last['item'])
+        other_player['chips'] += last['price']
+        player['containers'].append(last['item'])
+        last['buyer'] = pid
+        player['intercept'] = True
         
         self.message = f"{player['name']} перехватил контейнер"
         return True
     
-    def start_auction(self, container_id):
-        container = next((c for c in self.containers if c['id'] == container_id), None)
+    def start_auction(self, cid):
+        container = next((c for c in self.containers if c['id'] == cid), None)
         if not container:
             return False
         
-        self.auction_active = True
-        self.auction_start_time = time.time()
-        self.timer_running = True
-        self.auction_data = {
-            'container_id': container_id,
-            'current_price': container['price'],
-            'raise_count': 0,
-            'current_bidder': None,
-            'passed': []
+        self.auction = {
+            'id': cid,
+            'price': container['price'],
+            'raises': 0,
+            'leader': None,
+            'passed': [],
+            'start': time.time()
         }
+        self.auction_start = time.time()
         self.message = f"Аукцион! Старт: {container['price']} фишек"
         return True
     
-    def auction_bid(self, player_id, action):
-        if not self.auction_active:
-            self.message = "Аукцион не активен"
+    def auction_bid(self, pid, action):
+        if not self.auction:
             return False
         
-        player = self.players[player_id]
-        auction = self.auction_data
+        player = self.players[pid]
+        auction = self.auction
         
-        if player_id in auction['passed']:
+        if pid in auction['passed']:
             self.message = "Вы уже пасовали"
             return False
         
-        container = next((c for c in self.containers if c['id'] == auction['container_id']), None)
+        container = next((c for c in self.containers if c['id'] == auction['id']), None)
         if not container or container['bought']:
             self.message = "Контейнер уже куплен"
             return False
         
-        # Проверка таймаута аукциона
-        if time.time() - self.auction_start_time > AUCTION_TIMEOUT:
-            self.auction_active = False
-            self.timer_running = False
-            if auction['current_bidder']:
-                winner = auction['current_bidder']
-                if self.buy_container(winner, container['id']):
-                    self.message = f"Время вышло! {self.players[winner]['name']} забирает контейнер"
+        # Таймаут аукциона
+        if time.time() - self.auction_start > AUCTION_TIMEOUT:
+            self.auction = None
+            if auction['leader']:
+                if self.buy(auction['leader'], container['id']):
+                    self.message = f"Время вышло! {self.players[auction['leader']]['name']} забирает"
             else:
                 container['bought'] = True
                 self.message = "Время аукциона вышло!"
-            self.check_round_end()
+            self.check_round()
             return True
         
         if action == 'raise':
-            if auction['raise_count'] >= AUCTION_MAX_RAISES:
+            if auction['raises'] >= AUCTION_MAX_RAISES:
                 self.message = "Лимит повышений (3)"
                 return False
             
-            if player['chips'] < auction['current_price'] + AUCTION_STEP:
-                self.message = "Недостаточно фишек"
+            if player['chips'] < auction['price'] + AUCTION_STEP:
+                self.message = "Не хватает фишек"
                 return False
             
-            auction['current_price'] += AUCTION_STEP
-            auction['raise_count'] += 1
-            auction['current_bidder'] = player_id
-            self.message = f"{player['name']} повысил до {auction['current_price']}"
+            auction['price'] += AUCTION_STEP
+            auction['raises'] += 1
+            auction['leader'] = pid
             
-            if auction['raise_count'] >= AUCTION_MAX_RAISES:
-                if self.buy_container(player_id, container['id']):
-                    self.auction_active = False
-                    self.timer_running = False
+            self.message = f"{player['name']} повысил до {auction['price']}"
+            
+            if auction['raises'] >= AUCTION_MAX_RAISES:
+                if self.buy(pid, container['id']):
+                    self.auction = None
                     self.message = f"{player['name']} выиграл аукцион!"
-                    self.check_round_end()
+                    self.check_round()
             return True
             
         elif action == 'pass':
-            auction['passed'].append(player_id)
+            auction['passed'].append(pid)
             self.message = f"{player['name']} пасует"
             
             if len(auction['passed']) >= 2:
-                self.auction_active = False
-                self.timer_running = False
-                if auction['current_bidder']:
-                    winner = auction['current_bidder']
-                    if self.buy_container(winner, container['id']):
-                        self.message = f"{self.players[winner]['name']} выиграл аукцион!"
+                self.auction = None
+                if auction['leader']:
+                    if self.buy(auction['leader'], container['id']):
+                        self.message = f"{self.players[auction['leader']]['name']} выиграл аукцион!"
                 else:
                     container['bought'] = True
                     self.message = "Аукцион без победителя"
-                self.check_round_end()
+                self.check_round()
             return True
             
         elif action == 'buy':
-            if player['chips'] < auction['current_price']:
-                self.message = "Недостаточно фишек"
+            if player['chips'] < auction['price']:
+                self.message = "Не хватает фишек"
                 return False
             
-            if self.buy_container(player_id, container['id']):
-                self.auction_active = False
-                self.timer_running = False
+            if self.buy(pid, container['id']):
+                self.auction = None
                 self.message = f"{player['name']} купил контейнер!"
-                self.check_round_end()
+                self.check_round()
                 return True
         
         return False
     
-    def check_round_end(self):
+    def check_round(self):
         available = self.get_available()
         
-        # Все куплены
         if not available:
-            self.round_ended = True
-            self.waiting_for_next = True
-            self.timer_running = False
+            self.round_done = True
+            self.waiting = True
             if not self.game_over:
                 self.message = "Все контейнеры куплены!"
             return True
         
-        # Таймаут раунда
-        if self.started and time.time() - self.round_start_time > ROUND_TIMEOUT:
+        if self.started and time.time() - self.round_start > ROUND_TIMEOUT:
             for c in available:
                 c['bought'] = True
-            self.round_ended = True
-            self.waiting_for_next = True
-            self.timer_running = False
+            self.round_done = True
+            self.waiting = True
             if not self.game_over:
                 self.message = "Время вышло!"
             return True
         
         return False
     
-    def check_game_over(self):
-        if self.current_round >= MAX_ROUNDS and self.waiting_for_next:
-            # Подсчет очков
+    def check_game(self):
+        if self.round >= MAX_ROUNDS and self.waiting:
+            # Считаем очки
             for p in self.players.values():
                 p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
             
-            p1, p2 = self.players['player1'], self.players['player2']
+            p1, p2 = self.players['p1'], self.players['p2']
             
             if len(p1['containers']) < MIN_CONTAINERS:
-                self.winner = 'player2'
+                self.winner = 'p2'
             elif len(p2['containers']) < MIN_CONTAINERS:
-                self.winner = 'player1'
+                self.winner = 'p1'
             elif p1['score'] > p2['score']:
-                self.winner = 'player1'
+                self.winner = 'p1'
             elif p2['score'] > p1['score']:
-                self.winner = 'player2'
+                self.winner = 'p2'
             else:
-                self.winner = 'player1' if p1['chips'] > p2['chips'] else ('player2' if p2['chips'] > p1['chips'] else 'draw')
+                if p1['chips'] > p2['chips']:
+                    self.winner = 'p1'
+                elif p2['chips'] > p1['chips']:
+                    self.winner = 'p2'
+                else:
+                    self.winner = 'draw'
             
             self.game_over = True
-            self.timer_running = False
             return True
         return False
     
     def next_round(self):
-        if self.current_round >= MAX_ROUNDS:
+        if self.round >= MAX_ROUNDS:
             return
         
-        self.current_round += 1
+        self.round += 1
         self.containers = self.generate_containers()
-        self.round_start_time = time.time()
-        self.timer_running = True
-        self.auction_active = False
-        self.round_ended = False
-        self.waiting_for_next = False
-        self.message = f"Раунд {self.current_round}"
+        self.round_start = time.time()
+        self.auction = None
+        self.round_done = False
+        self.waiting = False
+        self.message = f"Раунд {self.round}"
 
 # ---------------------------
-# 3. SOCKET.IO
+# 3. ОБРАБОТЧИКИ
 # ---------------------------
 
 @app.route('/')
@@ -343,255 +337,254 @@ def index():
     return render_template('index.html')
 
 @socketio.on('connect')
-def handle_connect():
-    print(f"Client connected: {request.sid}")
+def connect():
+    print(f"Connected: {request.sid}")
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def disconnect():
+    print(f"Disconnected: {request.sid}")
     if request.sid in game_players:
-        game_id = game_players[request.sid]
-        if game_id in games:
-            game = games[game_id]
-            for pid in ['player1', 'player2']:
+        gid = game_players[request.sid]
+        if gid in games:
+            game = games[gid]
+            for pid in ['p1', 'p2']:
                 if game.players[pid]['sid'] == request.sid:
                     game.players[pid]['sid'] = None
-                    game.players_connected[pid] = False
-                    emit('player_disconnected', {'player_id': pid}, room=game_id)
+                    game.connected[pid] = False
+                    emit('player_disconnected', {'pid': pid}, room=gid)
 
-@socketio.on('join_game')
-def handle_join_game(data):
-    game_id = data.get('game_id', 'default')
-    player_id = data.get('player_id')
+@socketio.on('join')
+def join(data):
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
     
-    join_room(game_id)
-    game_players[request.sid] = game_id
+    join_room(gid)
+    game_players[request.sid] = gid
     
-    if game_id not in games:
-        games[game_id] = ContainerGame()
+    if gid not in games:
+        games[gid] = Game()
     
-    game = games[game_id]
+    game = games[gid]
     
-    if player_id not in ['player1', 'player2']:
-        emit('error', {'message': 'Неверный ID'})
+    if pid not in ['p1', 'p2']:
+        emit('error', {'msg': 'Неверный ID'})
         return
     
-    if game.players_connected[player_id]:
-        emit('error', {'message': f'{player_id} уже подключен'})
+    if game.connected[pid]:
+        emit('error', {'msg': f'{pid} уже подключен'})
         return
     
-    game.players[player_id]['sid'] = request.sid
-    game.players_connected[player_id] = True
+    game.players[pid]['sid'] = request.sid
+    game.connected[pid] = True
     
-    emit('player_assigned', {
-        'player_id': player_id,
-        'name': game.players[player_id]['name']
-    })
+    emit('assigned', {'pid': pid, 'name': game.players[pid]['name']})
     
-    send_state(game_id)
+    send_state(gid)
     
-    if game.players_connected['player1'] and game.players_connected['player2']:
-        emit('game_ready', {'message': 'Оба игрока готовы!'}, room=game_id)
+    if game.connected['p1'] and game.connected['p2']:
+        emit('ready', {'msg': 'Оба игрока готовы!'}, room=gid)
 
-@socketio.on('start_game')
-def handle_start_game(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('start')
+def start(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
-    if not (game.players_connected['player1'] and game.players_connected['player2']):
-        emit('error', {'message': 'Оба игрока должны быть подключены'})
+    game = games[gid]
+    
+    if not (game.connected['p1'] and game.connected['p2']):
+        emit('error', {'msg': 'Оба игрока должны быть подключены'})
         return
     
     if not game.started:
         game.started = True
         game.next_round()
-        send_state(game_id)
+        send_state(gid)
+        # Запускаем таймер
+        start_timer(gid)
 
-@socketio.on('buy_container')
-def handle_buy_container(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('buy')
+def buy(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
-    player_id = data.get('player_id')
-    container_id = data.get('container_id')
+    game = games[gid]
+    pid = data.get('pid')
+    cid = data.get('cid')
     
     if not game.started or game.game_over:
-        emit('error', {'message': 'Игра не активна'})
+        emit('error', {'msg': 'Игра не активна'})
         return
     
-    if game.auction_active:
-        emit('error', {'message': 'Идет аукцион!'})
+    if game.auction:
+        emit('error', {'msg': 'Идет аукцион!'})
         return
     
-    container = next((c for c in game.containers if c['id'] == container_id and not c['bought']), None)
+    container = next((c for c in game.containers if c['id'] == cid and not c['bought']), None)
     if container:
-        if game.buy_container(player_id, container_id):
-            emit('purchase_result', {
-                'type': container['type'],
+        if game.buy(pid, cid):
+            emit('bought', {
+                'item': container['item'],
                 'value': container['value']
             }, room=request.sid)
     
-    game.check_round_end()
-    send_state(game_id)
+    game.check_round()
+    send_state(gid)
 
-@socketio.on('use_xray')
-def handle_use_xray(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('xray')
+def xray(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
-    player_id = data.get('player_id')
-    container_id = data.get('container_id')
+    game = games[gid]
+    pid = data.get('pid')
+    cid = data.get('cid')
     
     if not game.started or game.game_over:
-        emit('error', {'message': 'Игра не активна'})
+        emit('error', {'msg': 'Игра не активна'})
         return
     
-    result = game.use_xray(player_id, container_id)
+    result = game.xray(pid, cid)
     if result:
         emit('xray_result', {
-            'type': result,
+            'item': result,
             'value': VALUES.get(result, 0)
         }, room=request.sid)
     
-    send_state(game_id)
+    send_state(gid)
 
-@socketio.on('use_intercept')
-def handle_use_intercept(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('intercept')
+def intercept(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
-    player_id = data.get('player_id')
+    game = games[gid]
+    pid = data.get('pid')
     
     if not game.started or game.game_over:
-        emit('error', {'message': 'Игра не активна'})
+        emit('error', {'msg': 'Игра не активна'})
         return
     
-    # Сохраняем информацию до перехвата
-    other_id = 'player2' if player_id == 'player1' else 'player1'
-    last_bought = None
+    # Сохраняем данные до перехвата
+    other = 'p2' if pid == 'p1' else 'p1'
+    last = None
     for c in reversed(game.containers):
-        if c['bought'] and c['buyer'] == other_id:
-            last_bought = c
+        if c['bought'] and c['buyer'] == other:
+            last = c
             break
     
-    if last_bought and game.use_intercept(player_id):
+    if last and game.intercept(pid):
         emit('intercept_result', {
-            'type': last_bought['type'],
-            'value': last_bought['value']
+            'item': last['item'],
+            'value': last['value']
         }, room=request.sid)
     
-    send_state(game_id)
+    send_state(gid)
 
-@socketio.on('auction_bid')
-def handle_auction_bid(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('auction')
+def auction(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
-    player_id = data.get('player_id')
+    game = games[gid]
+    pid = data.get('pid')
     action = data.get('action')
     
     if not game.started or game.game_over:
-        emit('error', {'message': 'Игра не активна'})
+        emit('error', {'msg': 'Игра не активна'})
         return
     
-    if not game.auction_active:
-        emit('error', {'message': 'Аукцион не активен'})
+    if not game.auction:
+        emit('error', {'msg': 'Аукцион не активен'})
         return
     
-    container_id = game.auction_data.get('container_id')
-    game.auction_bid(player_id, action)
+    cid = game.auction['id']
+    game.auction_bid(pid, action)
     
-    # Если аукцион завершился и кто-то купил
-    if not game.auction_active and container_id:
-        container = next((c for c in game.containers if c['id'] == container_id), None)
+    # Если аукцион завершился с покупкой
+    if not game.auction:
+        container = next((c for c in game.containers if c['id'] == cid), None)
         if container and container['bought']:
-            emit('purchase_result', {
-                'type': container['type'],
+            emit('bought', {
+                'item': container['item'],
                 'value': container['value']
             }, room=game.players[container['buyer']]['sid'])
     
-    send_state(game_id)
+    send_state(gid)
 
 @socketio.on('next_round')
-def handle_next_round(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+def next_round(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    game = games[game_id]
+    game = games[gid]
     
     if game.game_over:
-        emit('error', {'message': 'Игра закончена'})
+        emit('error', {'msg': 'Игра закончена'})
         return
     
-    if game.waiting_for_next:
+    if game.waiting:
         game.next_round()
-        send_state(game_id)
+        send_state(gid)
+        start_timer(gid)
 
-@socketio.on('reset_game')
-def handle_reset_game(data):
-    game_id = game_players.get(request.sid)
-    if not game_id or game_id not in games:
+@socketio.on('reset')
+def reset(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
         return
     
-    games[game_id] = ContainerGame()
-    game = games[game_id]
-    for pid in ['player1', 'player2']:
+    games[gid] = Game()
+    game = games[gid]
+    for pid in ['p1', 'p2']:
         if game.players[pid]['sid']:
-            game.players_connected[pid] = True
+            game.connected[pid] = True
     
-    send_state(game_id)
+    send_state(gid)
 
-def send_state(game_id):
-    if game_id not in games:
+def send_state(gid):
+    if gid not in games:
         return
     
-    game = games[game_id]
+    game = games[gid]
     
-    # Проверяем окончание игры
-    if game.current_round >= MAX_ROUNDS and game.waiting_for_next:
-        game.check_game_over()
+    if game.round >= MAX_ROUNDS and game.waiting:
+        game.check_game()
     
     state = {
-        'current_round': game.current_round,
-        'max_rounds': MAX_ROUNDS,
-        'game_over': game.game_over,
+        'round': game.round,
+        'max': MAX_ROUNDS,
+        'over': game.game_over,
         'winner': game.winner,
-        'message': game.message,
-        'auction_active': game.auction_active,
+        'msg': game.message,
+        'auction': game.auction is not None,
         'started': game.started,
-        'round_ended': game.round_ended,
-        'waiting_for_next': game.waiting_for_next,
+        'round_done': game.round_done,
+        'waiting': game.waiting,
         'players': {},
         'containers': []
     }
     
-    # Игроки
-    for pid, pdata in game.players.items():
+    for pid, p in game.players.items():
         state['players'][pid] = {
-            'name': pdata['name'],
-            'chips': pdata['chips'],
-            'containers': pdata['containers'],
-            'containers_count': len(pdata['containers']),
-            'used_xray': pdata['used_xray'],
-            'used_intercept': pdata['used_intercept'],
-            'connected': game.players_connected[pid]
+            'name': p['name'],
+            'chips': p['chips'],
+            'containers': p['containers'],
+            'count': len(p['containers']),
+            'xray': p['xray'],
+            'intercept': p['intercept'],
+            'connected': game.connected[pid]
         }
         if game.game_over:
-            state['players'][pid]['score'] = pdata['score']
+            state['players'][pid]['score'] = p['score']
         else:
             state['players'][pid]['score'] = None
     
-    # Доступные контейнеры
     for c in game.containers:
         if not c['bought']:
             state['containers'].append({
@@ -599,26 +592,57 @@ def send_state(game_id):
                 'price': c['price']
             })
     
-    # Аукцион
-    if game.auction_active:
-        state['auction'] = {
-            'current_price': game.auction_data['current_price'],
-            'raise_count': game.auction_data['raise_count'],
-            'max_raises': AUCTION_MAX_RAISES,
-            'current_bidder': game.auction_data['current_bidder'],
-            'passed': game.auction_data['passed']
+    if game.auction:
+        state['auction_data'] = {
+            'price': game.auction['price'],
+            'raises': game.auction['raises'],
+            'max': AUCTION_MAX_RAISES,
+            'leader': game.auction['leader'],
+            'passed': game.auction['passed']
         }
-        # Время аукциона
-        elapsed = time.time() - game.auction_start_time
-        state['auction_time_remaining'] = max(0, AUCTION_TIMEOUT - elapsed)
+        remaining = max(0, AUCTION_TIMEOUT - (time.time() - game.auction_start))
+        state['auction_time'] = remaining
     
-    # Таймер раунда
-    if game.started and not game.game_over and not game.round_ended:
-        elapsed = time.time() - game.round_start_time
-        state['time_remaining'] = max(0, ROUND_TIMEOUT - elapsed)
-        game.check_round_end()
+    if game.started and not game.game_over and not game.round_done:
+        remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start))
+        state['time'] = remaining
     
-    emit('game_state', state, room=game_id)
+    emit('state', state, room=gid)
+
+def start_timer(gid):
+    """Запускает поток для обновления таймера"""
+    def timer_loop():
+        while gid in games:
+            game = games[gid]
+            if not game.started or game.game_over:
+                break
+            
+            # Проверяем раунд
+            if not game.round_done:
+                game.check_round()
+                send_state(gid)
+            
+            # Проверяем аукцион
+            if game.auction:
+                if time.time() - game.auction_start > AUCTION_TIMEOUT:
+                    # Таймаут аукциона
+                    cid = game.auction['id']
+                    container = next((c for c in game.containers if c['id'] == cid), None)
+                    if container and not container['bought']:
+                        if game.auction['leader']:
+                            game.buy(game.auction['leader'], cid)
+                            game.message = f"Время вышло! {game.players[game.auction['leader']]['name']} забирает"
+                        else:
+                            container['bought'] = True
+                            game.message = "Время аукциона вышло!"
+                    game.auction = None
+                    game.check_round()
+                    send_state(gid)
+            
+            time.sleep(1)
+    
+    thread = threading.Thread(target=timer_loop, daemon=True)
+    thread.start()
 
 # ---------------------------
 # 4. ЗАПУСК
