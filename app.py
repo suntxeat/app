@@ -1,13 +1,12 @@
-from flask import Flask, render_template, request, session
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import random
 import time
-from typing import Dict, List, Optional
-import json
+import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # ---------------------------
 # 1. ИГРОВЫЕ КОНСТАНТЫ
@@ -306,12 +305,10 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
-    # Находим игру игрока
     if request.sid in game_players:
         game_id = game_players[request.sid]
         if game_id in games:
             game = games[game_id]
-            # Отмечаем игрока как отключенного
             for player_id in ['player1', 'player2']:
                 if game.players[player_id]['sid'] == request.sid:
                     game.players[player_id]['sid'] = None
@@ -323,17 +320,14 @@ def handle_join_game(data):
     game_id = data.get('game_id', 'default')
     player_id = data.get('player_id')
     
-    # Присоединяем к комнате игры
     join_room(game_id)
     game_players[request.sid] = game_id
     
-    # Создаем игру если ее нет
     if game_id not in games:
         games[game_id] = ContainerGame()
     
     game = games[game_id]
     
-    # Присваиваем игрока
     if player_id == 'player1' and not game.players_connected['player1']:
         game.players['player1']['sid'] = request.sid
         game.players_connected['player1'] = True
@@ -341,7 +335,6 @@ def handle_join_game(data):
         game.players['player2']['sid'] = request.sid
         game.players_connected['player2'] = True
     else:
-        # Если место занято, ищем свободное
         if not game.players_connected['player1']:
             game.players['player1']['sid'] = request.sid
             game.players_connected['player1'] = True
@@ -359,7 +352,6 @@ def handle_join_game(data):
         'name': game.players[player_id]['name']
     })
     
-    # Отправляем текущее состояние игры
     send_game_state(game_id)
     
     if game.players_connected['player1'] and game.players_connected['player2']:
@@ -396,7 +388,7 @@ def handle_buy_container(data):
         emit('error', {'message': 'Идет аукцион!'}, room=game_id)
         return
     
-    result = game.buy_container(player_id, container_id)
+    game.buy_container(player_id, container_id)
     send_game_state(game_id)
 
 @socketio.on('use_xray')
@@ -415,7 +407,6 @@ def handle_use_xray(data):
     result = game.use_xray(player_id, container_id)
     
     if result:
-        # Отправляем результат только игроку, который использовал рентген
         emit('xray_result', {
             'container_id': container_id,
             'type': result,
@@ -436,7 +427,7 @@ def handle_use_intercept(data):
     if not game.started or game.game_over:
         return
     
-    result = game.use_intercept(player_id)
+    game.use_intercept(player_id)
     send_game_state(game_id)
 
 @socketio.on('auction_bid')
@@ -452,7 +443,7 @@ def handle_auction_bid(data):
     if not game.started or game.game_over:
         return
     
-    result = game.auction_bid(player_id, action)
+    game.auction_bid(player_id, action)
     send_game_state(game_id)
 
 @socketio.on('next_round')
@@ -468,13 +459,11 @@ def handle_next_round(data):
         send_game_state(game_id)
 
 def send_game_state(game_id):
-    """Отправляет текущее состояние игры всем игрокам"""
     if game_id not in games:
         return
     
     game = games[game_id]
     
-    # Проверяем окончание игры
     if game.check_game_over():
         pass
     
@@ -489,23 +478,18 @@ def send_game_state(game_id):
         'players': {}
     }
     
-    # Данные игроков (скрываем содержимое контейнеров соперника)
     for player_id, player_data in game.players.items():
-        other_id = 'player2' if player_id == 'player1' else 'player1'
-        other_data = game.players[other_id]
-        
         state['players'][player_id] = {
             'name': player_data['name'],
             'chips': player_data['chips'],
             'score': player_data['score'],
-            'containers': player_data['containers'],  # показываем свои контейнеры
+            'containers': player_data['containers'],
             'containers_count': len(player_data['containers']),
             'used_xray': player_data['used_xray'],
             'used_intercept': player_data['used_intercept'],
             'connected': game.players_connected[player_id]
         }
     
-    # Контейнеры (скрываем содержимое)
     state['containers'] = []
     for c in game.containers:
         state['containers'].append({
@@ -513,11 +497,10 @@ def send_game_state(game_id):
             'price': c['price'],
             'bought': c['bought'],
             'buyer': c['buyer'],
-            'type': c['type'] if c['bought'] else None,  # показываем только купленные
+            'type': c['type'] if c['bought'] else None,
             'value': c['value'] if c['bought'] else None
         })
     
-    # Данные аукциона
     if game.auction_active:
         state['auction'] = {
             'container_id': game.auction_data['container_id'],
@@ -528,7 +511,6 @@ def send_game_state(game_id):
             'passed': game.auction_data['passed']
         }
     
-    # Проверяем таймаут
     if game.started and not game.game_over:
         elapsed = time.time() - game.round_start_time
         state['time_remaining'] = max(0, ROUND_TIMEOUT - elapsed)
@@ -543,4 +525,5 @@ def send_game_state(game_id):
 # ---------------------------
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
