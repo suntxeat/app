@@ -135,6 +135,12 @@
             background: #90caf9;
         }
         
+        .container-tag.hidden {
+            background: #e0e0e0;
+            color: #999;
+            font-style: italic;
+        }
+        
         .container-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -220,6 +226,7 @@
         .btn-purple { background: #9c27b0; color: white; }
         .btn-success { background: #4caf50; color: white; }
         .btn-info { background: #00bcd4; color: white; }
+        .btn-pink { background: #e91e63; color: white; }
         
         .auction-box {
             border: 3px solid #ff6b6b;
@@ -404,6 +411,7 @@
                     <button class="btn btn-secondary" onclick="startGame()" id="startBtn">🚀 Начать игру</button>
                     <button class="btn btn-primary" onclick="nextRound()" id="nextRoundBtn" style="display:none;">➡️ Следующий раунд</button>
                     <button class="btn btn-purple" onclick="useIntercept()" id="interceptBtn">🦅 Перехват</button>
+                    <button class="btn btn-pink" onclick="resetGame()" id="resetBtn">🔄 Новая игра</button>
                 </div>
                 
                 <!-- Таймер -->
@@ -416,7 +424,7 @@
                     <div class="game-over">
                         <h2>🏆 ИГРА ОКОНЧЕНА!</h2>
                         <p id="gameOverMessage"></p>
-                        <button class="btn btn-success" onclick="location.reload()" style="font-size: 1.2em; padding: 15px 30px; margin-top: 15px;">
+                        <button class="btn btn-success" onclick="resetGame()" style="font-size: 1.2em; padding: 15px 30px; margin-top: 15px;">
                             🔄 Новая игра
                         </button>
                     </div>
@@ -475,11 +483,21 @@
                     `;
                     container.style.borderColor = '#4CAF50';
                     setTimeout(() => {
-                        if (!gameState || !gameState.containers.find(c => c.id === data.container_id && c.bought)) {
-                            container.innerHTML = `
-                                <div class="hidden">❓ Содержимое скрыто</div>
-                            `;
-                            container.style.borderColor = '#ddd';
+                        // Возвращаем скрытое состояние
+                        const currentState = gameState;
+                        if (currentState) {
+                            const c = currentState.containers.find(c => c.id === data.container_id);
+                            if (c && !c.bought) {
+                                container.innerHTML = `
+                                    <div class="price">💰 ${c.price}</div>
+                                    <div class="hidden">❓ Содержимое скрыто</div>
+                                    <div class="btn-group">
+                                        <button class="btn btn-primary" onclick="buyContainer(${c.id})">Купить</button>
+                                        <button class="btn btn-info" onclick="useXray(${c.id})">🔍</button>
+                                    </div>
+                                `;
+                                container.style.borderColor = '#ddd';
+                            }
                         }
                     }, 3000);
                 }
@@ -546,6 +564,8 @@
                 }
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('interceptBtn').disabled = true;
+            } else {
+                document.getElementById('gameOverScreen').style.display = 'none';
             }
             
             if (state.round_ended) {
@@ -558,6 +578,9 @@
             if (you) {
                 document.getElementById('interceptBtn').disabled = you.used_intercept || state.game_over;
             }
+            
+            // Кнопка "Новая игра" всегда активна
+            document.getElementById('resetBtn').disabled = false;
         }
         
         function updatePlayer(id, data, other) {
@@ -569,14 +592,27 @@
             document.getElementById(prefix + 'Score').textContent = data.score;
             document.getElementById(prefix + 'Containers').textContent = data.containers_count;
             
+            // Показываем контейнеры только свои! Чужие скрываем
             const list = document.getElementById(prefix + 'ContainersList');
             list.innerHTML = '';
-            data.containers.forEach(c => {
-                const tag = document.createElement('span');
-                tag.className = 'container-tag ' + (isYou ? 'you' : 'opponent');
-                tag.textContent = c;
-                list.appendChild(tag);
-            });
+            
+            if (isYou) {
+                // Свои контейнеры показываем полностью
+                data.containers.forEach(c => {
+                    const tag = document.createElement('span');
+                    tag.className = 'container-tag you';
+                    tag.textContent = c;
+                    list.appendChild(tag);
+                });
+            } else {
+                // Чужие контейнеры показываем как "скрыто"
+                if (data.containers_count > 0) {
+                    const tag = document.createElement('span');
+                    tag.className = 'container-tag hidden';
+                    tag.textContent = `🔒 ${data.containers_count} конт.`;
+                    list.appendChild(tag);
+                }
+            }
             
             document.getElementById(prefix + 'Xray').textContent = data.used_xray ? '✅' : '❌';
             document.getElementById(prefix + 'Intercept').textContent = data.used_intercept ? '✅' : '❌';
@@ -592,12 +628,15 @@
                 div.dataset.containerId = c.id;
                 
                 if (c.bought) {
+                    // Купленный контейнер - показываем что куплен, но содержимое видно только владельцу
+                    const buyerName = gameState && gameState.players && gameState.players[c.buyer] ? gameState.players[c.buyer].name : 'неизвестно';
                     div.innerHTML = `
-                        <div class="type">${c.type}</div>
-                        <div class="value">+${c.value} очков</div>
-                        <div style="font-size: 0.8em; color: #666;">💰 ${c.price} фишек</div>
+                        <div style="font-size: 0.9em; color: #666;">✅ Куплен</div>
+                        <div style="font-size: 0.8em; color: #888;">💰 ${c.price} фишек</div>
+                        <div style="font-size: 0.8em; color: #888;">👤 ${buyerName}</div>
                     `;
                 } else {
+                    // Доступный контейнер - содержимое скрыто
                     div.innerHTML = `
                         <div class="price">💰 ${c.price}</div>
                         <div class="hidden">❓ Содержимое скрыто</div>
@@ -646,6 +685,18 @@
         
         function nextRound() {
             socket.emit('next_round', {});
+        }
+        
+        function resetGame() {
+            if (confirm('Начать новую игру?')) {
+                socket.emit('reset_game', {});
+                // Обновляем интерфейс
+                document.getElementById('gameOverScreen').style.display = 'none';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('interceptBtn').disabled = false;
+                document.getElementById('nextRoundBtn').style.display = 'none';
+                showMessage('info', '🔄 Начинаем новую игру!');
+            }
         }
         
         document.getElementById('startBtn').disabled = true;
