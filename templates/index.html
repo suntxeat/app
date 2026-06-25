@@ -6,11 +6,7 @@
     <title>🎮 Контейнеры - Игра</title>
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -118,6 +114,7 @@
             flex-wrap: wrap;
             gap: 5px;
             margin-top: 10px;
+            min-height: 30px;
         }
         
         .container-tag {
@@ -129,10 +126,6 @@
         
         .container-tag.you {
             background: #a5d6a7;
-        }
-        
-        .container-tag.opponent {
-            background: #90caf9;
         }
         
         .container-tag.hidden {
@@ -185,9 +178,15 @@
             color: #666;
         }
         
+        .container-item .bought-label {
+            font-size: 0.9em;
+            color: #888;
+        }
+        
         .container-item.bought {
             opacity: 0.6;
             background: #f5f5f5;
+            border-color: #ccc;
         }
         
         .btn-group {
@@ -281,6 +280,12 @@
             font-size: 1.2em;
             padding: 15px 30px;
             margin: 10px;
+        }
+        
+        .empty-message {
+            color: #999;
+            font-style: italic;
+            font-size: 0.9em;
         }
         
         @media (max-width: 768px) {
@@ -475,18 +480,21 @@
             });
             
             socket.on('xray_result', function(data) {
+                showMessage('success', `🔍 В контейнере: ${data.type} (+${data.value} очков)`);
+                // Показываем результат рентгена в контейнере
                 const container = document.querySelector(`[data-container-id="${data.container_id}"]`);
                 if (container) {
+                    const oldHtml = container.innerHTML;
                     container.innerHTML = `
                         <div class="type">🔍 ${data.type}</div>
                         <div class="value">+${data.value} очков</div>
                     `;
                     container.style.borderColor = '#4CAF50';
+                    container.style.background = '#e8f5e9';
                     setTimeout(() => {
-                        // Возвращаем скрытое состояние
-                        const currentState = gameState;
-                        if (currentState) {
-                            const c = currentState.containers.find(c => c.id === data.container_id);
+                        // Возвращаем исходный вид, если контейнер еще не куплен
+                        if (gameState) {
+                            const c = gameState.containers.find(c => c.id === data.container_id);
                             if (c && !c.bought) {
                                 container.innerHTML = `
                                     <div class="price">💰 ${c.price}</div>
@@ -497,9 +505,10 @@
                                     </div>
                                 `;
                                 container.style.borderColor = '#ddd';
+                                container.style.background = 'white';
                             }
                         }
-                    }, 3000);
+                    }, 5000);
                 }
             });
             
@@ -531,17 +540,19 @@
                 showMessage('info', state.message);
             }
             
-            updatePlayer('player1', state.players.player1, state.players.player2);
-            updatePlayer('player2', state.players.player2, state.players.player1);
+            updatePlayer('player1', state.players.player1);
+            updatePlayer('player2', state.players.player2);
             updateContainers(state.containers);
             
             if (state.auction_active) {
                 document.getElementById('auctionArea').style.display = 'block';
                 const auction = state.auction;
+                const container = state.containers.find(c => c.id === auction.container_id);
                 document.getElementById('auctionInfo').innerHTML = `
                     <p>💰 Текущая ставка: <strong>${auction.current_price}</strong> фишек</p>
                     <p>🔄 Повышений: ${auction.raise_count}/${auction.max_raises}</p>
                     <p>${auction.current_bidder ? '👤 Текущий лидер: ' + state.players[auction.current_bidder].name : '⏳ Ожидание ставок'}</p>
+                    ${container ? `<p style="font-size: 0.9em; color: #666;">❓ Содержимое скрыто</p>` : ''}
                 `;
             } else {
                 document.getElementById('auctionArea').style.display = 'none';
@@ -564,26 +575,29 @@
                 }
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('interceptBtn').disabled = true;
+                document.getElementById('nextRoundBtn').style.display = 'none';
             } else {
                 document.getElementById('gameOverScreen').style.display = 'none';
             }
             
-            if (state.round_ended) {
+            // Кнопка следующего раунда
+            if (state.round_ended && !state.game_over) {
                 document.getElementById('nextRoundBtn').style.display = 'block';
             } else {
                 document.getElementById('nextRoundBtn').style.display = 'none';
             }
             
+            // Кнопка перехвата
             const you = state.players[playerId];
             if (you) {
-                document.getElementById('interceptBtn').disabled = you.used_intercept || state.game_over;
+                document.getElementById('interceptBtn').disabled = you.used_intercept || state.game_over || !state.started;
             }
             
             // Кнопка "Новая игра" всегда активна
             document.getElementById('resetBtn').disabled = false;
         }
         
-        function updatePlayer(id, data, other) {
+        function updatePlayer(id, data) {
             const prefix = id === 'player1' ? 'p1' : 'p2';
             const isYou = id === playerId;
             
@@ -592,25 +606,37 @@
             document.getElementById(prefix + 'Score').textContent = data.score;
             document.getElementById(prefix + 'Containers').textContent = data.containers_count;
             
-            // Показываем контейнеры только свои! Чужие скрываем
+            // Показываем ТОЛЬКО СВОИ контейнеры
             const list = document.getElementById(prefix + 'ContainersList');
             list.innerHTML = '';
             
             if (isYou) {
                 // Свои контейнеры показываем полностью
-                data.containers.forEach(c => {
-                    const tag = document.createElement('span');
-                    tag.className = 'container-tag you';
-                    tag.textContent = c;
-                    list.appendChild(tag);
-                });
+                if (data.containers.length === 0) {
+                    const span = document.createElement('span');
+                    span.className = 'empty-message';
+                    span.textContent = 'пока нет';
+                    list.appendChild(span);
+                } else {
+                    data.containers.forEach(c => {
+                        const tag = document.createElement('span');
+                        tag.className = 'container-tag you';
+                        tag.textContent = c;
+                        list.appendChild(tag);
+                    });
+                }
             } else {
-                // Чужие контейнеры показываем как "скрыто"
+                // Чужие контейнеры СКРЫВАЕМ полностью
                 if (data.containers_count > 0) {
                     const tag = document.createElement('span');
                     tag.className = 'container-tag hidden';
-                    tag.textContent = `🔒 ${data.containers_count} конт.`;
+                    tag.textContent = `🔒 ${data.containers_count} конт. (скрыто)`;
                     list.appendChild(tag);
+                } else {
+                    const span = document.createElement('span');
+                    span.className = 'empty-message';
+                    span.textContent = 'пока нет';
+                    list.appendChild(span);
                 }
             }
             
@@ -622,30 +648,32 @@
             const grid = document.getElementById('containersGrid');
             grid.innerHTML = '';
             
-            containers.forEach(c => {
+            if (!containers || containers.length === 0) {
+                grid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #999;">Нет доступных контейнеров</p>';
+                return;
+            }
+            
+            // Показываем ТОЛЬКО ДОСТУПНЫЕ (не купленные) контейнеры
+            const available = containers.filter(c => !c.bought);
+            
+            if (available.length === 0) {
+                grid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #999;">✅ Все контейнеры куплены!</p>';
+                return;
+            }
+            
+            available.forEach(c => {
                 const div = document.createElement('div');
-                div.className = 'container-item' + (c.bought ? ' bought' : '');
+                div.className = 'container-item';
                 div.dataset.containerId = c.id;
                 
-                if (c.bought) {
-                    // Купленный контейнер - показываем что куплен, но содержимое видно только владельцу
-                    const buyerName = gameState && gameState.players && gameState.players[c.buyer] ? gameState.players[c.buyer].name : 'неизвестно';
-                    div.innerHTML = `
-                        <div style="font-size: 0.9em; color: #666;">✅ Куплен</div>
-                        <div style="font-size: 0.8em; color: #888;">💰 ${c.price} фишек</div>
-                        <div style="font-size: 0.8em; color: #888;">👤 ${buyerName}</div>
-                    `;
-                } else {
-                    // Доступный контейнер - содержимое скрыто
-                    div.innerHTML = `
-                        <div class="price">💰 ${c.price}</div>
-                        <div class="hidden">❓ Содержимое скрыто</div>
-                        <div class="btn-group">
-                            <button class="btn btn-primary" onclick="buyContainer(${c.id})">Купить</button>
-                            <button class="btn btn-info" onclick="useXray(${c.id})">🔍</button>
-                        </div>
-                    `;
-                }
+                div.innerHTML = `
+                    <div class="price">💰 ${c.price}</div>
+                    <div class="hidden">❓ Содержимое скрыто</div>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="buyContainer(${c.id})">Купить</button>
+                        <button class="btn btn-info" onclick="useXray(${c.id})">🔍</button>
+                    </div>
+                `;
                 
                 grid.appendChild(div);
             });
@@ -685,17 +713,21 @@
         
         function nextRound() {
             socket.emit('next_round', {});
+            document.getElementById('nextRoundBtn').disabled = true;
+            setTimeout(() => {
+                document.getElementById('nextRoundBtn').disabled = false;
+            }, 1000);
         }
         
         function resetGame() {
             if (confirm('Начать новую игру?')) {
                 socket.emit('reset_game', {});
-                // Обновляем интерфейс
                 document.getElementById('gameOverScreen').style.display = 'none';
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('interceptBtn').disabled = false;
                 document.getElementById('nextRoundBtn').style.display = 'none';
                 showMessage('info', '🔄 Начинаем новую игру!');
+                location.reload();
             }
         }
         
