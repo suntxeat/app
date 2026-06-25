@@ -17,7 +17,7 @@ EMOJIS = {"Яхта": "⛵", "Дом": "🏠", "Мебель": "🪑", "Вело
 
 MAX_ROUNDS = 3
 MIN_CONTAINERS = 2
-AUCTION_STEP = 10
+AUCTION_STEP = 10  # Шаг аукциона 10 фишек
 AUCTION_MAX_RAISES = 3
 ROUND_TIMEOUT = 30
 
@@ -25,8 +25,8 @@ ROUND_TIMEOUT = 30
 # 2. УПРАВЛЕНИЕ ИГРАМИ
 # ---------------------------
 
-games = {}  # {game_id: game_data}
-game_players = {}  # {player_sid: game_id}
+games = {}
+game_players = {}
 
 class ContainerGame:
     def __init__(self):
@@ -60,6 +60,7 @@ class ContainerGame:
         return pool
     
     def generate_containers(self):
+        """Генерирует от 1 до 5 контейнеров со случайными ценами"""
         if not self.pool:
             return []
         
@@ -71,7 +72,7 @@ class ContainerGame:
                 break
             
             c_type = self.pool.pop()
-            price = random.randint(5, 65)
+            price = random.randint(5, 65)  # Случайная цена
             
             containers.append({
                 'id': len(containers),
@@ -154,6 +155,7 @@ class ContainerGame:
         return True
     
     def start_auction(self, container_id: int):
+        """Запускает аукцион, если на столе 1 контейнер и оба хотят его купить"""
         container = next((c for c in self.containers if c['id'] == container_id), None)
         if not container:
             return False
@@ -164,7 +166,8 @@ class ContainerGame:
             'current_price': container['price'],
             'raise_count': 0,
             'current_bidder': None,
-            'passed': []
+            'passed': [],
+            'players_in': ['player1', 'player2']
         }
         self.message = f"🔥 Начался аукцион! Старт: {container['price']} фишек"
         return True
@@ -188,7 +191,7 @@ class ContainerGame:
         
         if action == 'raise':
             if auction['raise_count'] >= AUCTION_MAX_RAISES:
-                self.message = "❌ Достигнут лимит повышений!"
+                self.message = "❌ Достигнут лимит повышений (3)!"
                 return False
             
             if player['chips'] < auction['current_price'] + AUCTION_STEP:
@@ -202,6 +205,7 @@ class ContainerGame:
             self.message = f"⬆️ {player['name']} повысил до {auction['current_price']} фишек"
             
             if auction['raise_count'] >= AUCTION_MAX_RAISES:
+                # Автоматическая покупка после 3-го повышения
                 if self.buy_container(player_id, container['id']):
                     self.auction_active = False
                     self.message = f"🏆 {player['name']} выиграл аукцион за {auction['current_price']} фишек!"
@@ -214,15 +218,11 @@ class ContainerGame:
             self.message = f"🙅 {player['name']} пасует"
             
             if len(auction['passed']) >= 2:
+                # Оба пасовали - контейнер уходит в сброс
                 self.auction_active = False
-                if auction['current_bidder']:
-                    winner_id = auction['current_bidder']
-                    if self.buy_container(winner_id, container['id']):
-                        self.message = f"🏆 {self.players[winner_id]['name']} выиграл аукцион за {auction['current_price']} фишек!"
-                        self.check_round_end()
-                else:
-                    self.message = "❌ Аукцион завершен без победителя!"
-                    self.check_round_end()
+                container['bought'] = True
+                self.message = "❌ Аукцион завершен без победителя! Контейнер ушел в сброс"
+                self.check_round_end()
             
             return True
             
@@ -417,14 +417,12 @@ def handle_buy_container(data):
         return
     
     if game.auction_active:
-        emit('error', {'message': 'Идет аукцион!'}, room=game_id)
+        emit('error', {'message': 'Идет аукцион! Нельзя купить напрямую'}, room=game_id)
         return
     
-    # Покупаем и показываем, что внутри только покупателю
     container = next((c for c in game.containers if c['id'] == container_id and not c['bought']), None)
     if container:
         game.buy_container(player_id, container_id)
-        # Отправляем результат покупки только покупателю
         emit('purchase_result', {
             'container_id': container_id,
             'type': container['type'],
@@ -480,7 +478,6 @@ def handle_use_intercept(data):
     
     if last_bought:
         game.use_intercept(player_id)
-        # Показываем результат перехвата только перехватившему
         emit('intercept_result', {
             'container_id': last_bought['id'],
             'type': last_bought['type'],
@@ -502,7 +499,7 @@ def handle_auction_bid(data):
     if not game.started or game.game_over:
         return
     
-    # Для аукциона тоже показываем результат только победителю
+    # Сохраняем ID контейнера до завершения аукциона
     container_id = game.auction_data.get('container_id') if game.auction_active else None
     
     game.auction_bid(player_id, action)
@@ -573,12 +570,12 @@ def send_game_state(game_id):
         'containers': []
     }
     
-    # Данные игроков - НЕ ПОКАЗЫВАЕМ ОЧКИ до конца игры
+    # Данные игроков
     for player_id, player_data in game.players.items():
         state['players'][player_id] = {
             'name': player_data['name'],
             'chips': player_data['chips'],
-            'containers': player_data['containers'],  # Только свои контейнеры
+            'containers': player_data['containers'],
             'containers_count': len(player_data['containers']),
             'used_xray': player_data['used_xray'],
             'used_intercept': player_data['used_intercept'],
@@ -588,7 +585,7 @@ def send_game_state(game_id):
         if game.game_over:
             state['players'][player_id]['score'] = player_data['score']
         else:
-            state['players'][player_id]['score'] = '?'  # Скрываем очки
+            state['players'][player_id]['score'] = None  # Скрываем очки
     
     # Контейнеры на столе - показываем ТОЛЬКО доступные для покупки
     for c in game.containers:
