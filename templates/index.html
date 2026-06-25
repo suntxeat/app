@@ -6,698 +6,529 @@
     <title>Контейнеры</title>
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin:0; padding:0; box-sizing:border-box; }
         body {
             font-family: 'Segoe UI', sans-serif;
             background: #0d1117;
-            min-height: 100vh;
-            padding: 20px;
-            color: #e6edf3;
+            min-height:100vh;
+            padding:16px;
+            color:#e6edf3;
         }
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: #161b22;
-            border-radius: 16px;
-            padding: 24px;
-            border: 1px solid #30363d;
+            max-width:1100px;
+            margin:0 auto;
+            background:#161b22;
+            border-radius:12px;
+            padding:20px;
+            border:1px solid #30363d;
         }
-        .header {
-            text-align: center;
-            padding: 16px 0 24px;
-            border-bottom: 1px solid #30363d;
-            margin-bottom: 24px;
+        .header { text-align:center; padding:12px 0 20px; border-bottom:1px solid #30363d; margin-bottom:20px; }
+        .header h1 { font-size:1.8em; font-weight:300; letter-spacing:3px; color:#f0f6fc; }
+        .header h1 span { color:#58a6ff; }
+        .status {
+            background:#0d1117;
+            padding:8px 16px;
+            border-radius:8px;
+            margin-bottom:12px;
+            display:flex;
+            justify-content:space-between;
+            flex-wrap:wrap;
+            border:1px solid #30363d;
+            font-size:0.9em;
         }
-        .header h1 {
-            font-size: 2em;
-            font-weight: 300;
-            letter-spacing: 3px;
-            color: #f0f6fc;
+        .status .round { color:#58a6ff; font-weight:600; }
+        .status .player { color:#3fb950; font-weight:600; }
+        .status .timer { color:#d29922; font-weight:600; }
+        .msg {
+            padding:8px 14px;
+            border-radius:6px;
+            margin-bottom:12px;
+            background:#0d1117;
+            border-left:3px solid #58a6ff;
+            color:#8b949e;
+            min-height:38px;
+            display:flex;
+            align-items:center;
+            font-size:0.9em;
         }
-        .header h1 span { color: #58a6ff; }
-        .status-bar {
-            background: #0d1117;
-            padding: 10px 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            border: 1px solid #30363d;
-            font-size: 0.9em;
+        .msg.ok { border-left-color:#3fb950; color:#7ee787; }
+        .msg.err { border-left-color:#f85149; color:#ff7b72; }
+        .msg.warn { border-left-color:#d29922; color:#e3b341; }
+        .players { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
+        .card {
+            background:#0d1117;
+            border-radius:10px;
+            padding:14px;
+            border:1px solid #30363d;
+            transition:border 0.3s;
         }
-        .status-bar .round { color: #58a6ff; font-weight: 600; }
-        .status-bar .player { color: #3fb950; font-weight: 600; }
-        .status-bar .timer { color: #d29922; font-weight: 600; }
-        .message-box {
-            padding: 10px 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            background: #0d1117;
-            border-left: 3px solid #58a6ff;
-            color: #8b949e;
-            min-height: 44px;
-            display: flex;
-            align-items: center;
-            font-size: 0.95em;
+        .card.you { border-color:#58a6ff; }
+        .card .name { font-weight:600; font-size:1em; margin-bottom:8px; }
+        .card .name .badge { font-size:0.7em; color:#58a6ff; background:#0d1117; padding:1px 10px; border-radius:10px; margin-left:8px; border:1px solid #30363d; }
+        .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:8px; }
+        .stat { background:#161b22; padding:4px; border-radius:6px; text-align:center; }
+        .stat .lbl { font-size:0.6em; color:#8b949e; text-transform:uppercase; letter-spacing:0.5px; }
+        .stat .val { font-size:1.1em; font-weight:600; margin-top:1px; }
+        .stat .val.chips { color:#3fb950; }
+        .stat .val.score { color:#d29922; }
+        .stat .val.hidden { color:#484f58; }
+        .stat .val.containers { color:#58a6ff; }
+        .clist { display:flex; flex-wrap:wrap; gap:4px; min-height:22px; margin-top:4px; }
+        .tag {
+            background:#161b22;
+            padding:1px 10px;
+            border-radius:10px;
+            font-size:0.7em;
+            border:1px solid #30363d;
+            color:#8b949e;
         }
-        .message-box.success { border-left-color: #3fb950; color: #7ee787; }
-        .message-box.error { border-left-color: #f85149; color: #ff7b72; }
-        .message-box.warning { border-left-color: #d29922; color: #e3b341; }
-        .players-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 20px;
+        .tag.yours { border-color:#58a6ff; color:#58a6ff; }
+        .tag.hidden { color:#484f58; font-style:italic; }
+        .abilities { margin-top:6px; font-size:0.75em; color:#8b949e; display:flex; gap:12px; }
+        .abilities .used { color:#3fb950; }
+        .abilities .avail { color:#484f58; }
+        .section { font-size:0.85em; font-weight:600; color:#8b949e; margin:10px 0 8px; text-transform:uppercase; letter-spacing:0.5px; }
+        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; margin:8px 0 12px; }
+        .item {
+            background:#0d1117;
+            border:1px solid #30363d;
+            border-radius:8px;
+            padding:12px;
+            text-align:center;
+            transition:all 0.2s;
         }
-        .player-card {
-            background: #0d1117;
-            border-radius: 12px;
-            padding: 16px;
-            border: 1px solid #30363d;
-            transition: border-color 0.3s;
-        }
-        .player-card.you { border-color: #58a6ff; }
-        .player-card .name {
-            font-size: 1em;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .player-card .name .badge {
-            font-size: 0.7em;
-            color: #58a6ff;
-            background: #0d1117;
-            padding: 2px 10px;
-            border-radius: 12px;
-            margin-left: 8px;
-            border: 1px solid #30363d;
-        }
-        .player-stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 6px;
-            margin-bottom: 10px;
-        }
-        .stat {
-            background: #161b22;
-            padding: 6px;
-            border-radius: 6px;
-            text-align: center;
-        }
-        .stat .label {
-            font-size: 0.65em;
-            color: #8b949e;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .stat .value {
-            font-size: 1.2em;
-            font-weight: 600;
-            margin-top: 2px;
-        }
-        .stat .value.chips { color: #3fb950; }
-        .stat .value.score { color: #d29922; }
-        .stat .value.hidden { color: #484f58; }
-        .stat .value.containers { color: #58a6ff; }
-        .containers-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-            min-height: 26px;
-            margin-top: 6px;
-        }
-        .container-tag {
-            background: #161b22;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: 0.75em;
-            border: 1px solid #30363d;
-            color: #8b949e;
-        }
-        .container-tag.yours { border-color: #58a6ff; color: #58a6ff; }
-        .container-tag.hidden { color: #484f58; font-style: italic; }
-        .abilities {
-            margin-top: 8px;
-            font-size: 0.8em;
-            color: #8b949e;
-            display: flex;
-            gap: 16px;
-        }
-        .abilities .used { color: #3fb950; }
-        .abilities .available { color: #484f58; }
-        .section-title {
-            font-size: 0.9em;
-            font-weight: 600;
-            color: #8b949e;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .container-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 12px;
-            margin: 10px 0 16px;
-        }
-        .container-item {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 10px;
-            padding: 14px;
-            text-align: center;
-            transition: all 0.3s;
-        }
-        .container-item:hover { border-color: #58a6ff; transform: translateY(-2px); }
-        .container-item .price {
-            font-size: 1.4em;
-            font-weight: 600;
-            color: #3fb950;
-        }
-        .container-item .label {
-            font-size: 0.7em;
-            color: #8b949e;
-            margin-top: 2px;
-        }
-        .container-item .hidden-label {
-            font-size: 0.8em;
-            color: #484f58;
-            margin-top: 6px;
-        }
-        .container-item .btn-group {
-            display: flex;
-            gap: 6px;
-            margin-top: 10px;
-        }
-        .container-item .btn-group .btn { flex: 1; }
+        .item:hover { border-color:#58a6ff; transform:translateY(-2px); }
+        .item .price { font-size:1.3em; font-weight:600; color:#3fb950; }
+        .item .lbl { font-size:0.65em; color:#8b949e; margin-top:2px; }
+        .item .hidden { font-size:0.75em; color:#484f58; margin-top:4px; }
+        .item .btns { display:flex; gap:4px; margin-top:8px; }
+        .item .btns .btn { flex:1; }
         .btn {
-            padding: 5px 10px;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.8em;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-weight: 500;
+            padding:4px 10px;
+            border:none;
+            border-radius:6px;
+            font-size:0.75em;
+            cursor:pointer;
+            transition:all 0.2s;
+            font-weight:500;
         }
-        .btn:hover { opacity: 0.85; transform: translateY(-1px); }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .btn-primary { background: #238636; color: #fff; }
-        .btn-secondary { background: #21262d; color: #c9d1d9; }
-        .btn-warning { background: #d29922; color: #0d1117; }
-        .btn-danger { background: #da3633; color: #fff; }
-        .btn-purple { background: #8957e5; color: #fff; }
-        .btn-pink { background: #f778ba; color: #0d1117; }
-        .btn-success { background: #238636; color: #fff; }
-        .btn-outline {
-            background: transparent;
-            color: #8b949e;
-            border: 1px solid #30363d;
+        .btn:hover { opacity:0.85; transform:translateY(-1px); }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+        .btn.green { background:#238636; color:#fff; }
+        .btn.gray { background:#21262d; color:#c9d1d9; }
+        .btn.yellow { background:#d29922; color:#0d1117; }
+        .btn.red { background:#da3633; color:#fff; }
+        .btn.purple { background:#8957e5; color:#fff; }
+        .btn.pink { background:#f778ba; color:#0d1117; }
+        .btn.blue { background:#1f6feb; color:#fff; }
+        .actions { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+        .actions .btn { flex:1; min-width:80px; padding:6px 12px; font-size:0.8em; }
+        .auction {
+            background:#0d1117;
+            border:1px solid #d29922;
+            border-radius:10px;
+            padding:14px;
+            margin:10px 0;
+            animation:pulse 2s infinite;
         }
-        .btn-outline:hover { border-color: #58a6ff; color: #58a6ff; }
-        .actions-group {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin: 12px 0;
+        @keyframes pulse { 0%,100%{border-color:#d29922;} 50%{border-color:#da3633;} }
+        .auction .title { font-size:1em; font-weight:600; color:#d29922; margin-bottom:8px; }
+        .auction .info { color:#8b949e; font-size:0.85em; }
+        .auction .info strong { color:#f0f6fc; }
+        .auction .btns { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+        .auction .btns .btn { flex:1; min-width:60px; padding:4px 10px; font-size:0.75em; }
+        .bar { width:100%; height:3px; background:#161b22; border-radius:2px; overflow:hidden; margin:6px 0; }
+        .fill { height:100%; background:linear-gradient(90deg,#238636,#d29922,#da3633); transition:width 1s linear; }
+        .over {
+            background:#0d1117;
+            border:1px solid #d29922;
+            border-radius:10px;
+            padding:16px;
+            margin:12px 0;
+            text-align:center;
         }
-        .actions-group .btn {
-            flex: 1;
-            min-width: 90px;
-            padding: 8px 14px;
-            font-size: 0.85em;
+        .over .title { font-size:1.4em; font-weight:600; color:#d29922; margin-bottom:8px; }
+        .over .msg { color:#8b949e; font-size:0.95em; margin-bottom:10px; }
+        .over .details { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:10px 0; }
+        .over .player { background:#161b22; padding:12px; border-radius:8px; text-align:left; }
+        .over .player .name { font-weight:600; color:#f0f6fc; margin-bottom:4px; }
+        .over .player .line { color:#8b949e; font-size:0.8em; margin:2px 0; }
+        .over .player .line strong { color:#f0f6fc; }
+        .join { text-align:center; padding:30px 20px; }
+        .join .title { font-size:1.4em; font-weight:300; color:#f0f6fc; margin-bottom:6px; }
+        .join .sub { color:#8b949e; margin-bottom:16px; }
+        .join .btns { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+        .join .btns .btn { padding:8px 24px; font-size:0.95em; min-width:80px; }
+        .empty { color:#484f58; text-align:center; padding:12px; font-style:italic; font-size:0.85em; }
+        @media(max-width:768px){
+            .container{padding:12px;}
+            .players{grid-template-columns:1fr;}
+            .grid{grid-template-columns:1fr 1fr;}
+            .header h1{font-size:1.3em;}
+            .status{font-size:0.75em;}
+            .over .details{grid-template-columns:1fr;}
         }
-        .auction-box {
-            background: #0d1117;
-            border: 1px solid #d29922;
-            border-radius: 12px;
-            padding: 16px;
-            margin: 12px 0;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { border-color: #d29922; }
-            50% { border-color: #da3633; }
-        }
-        .auction-box .title {
-            font-size: 1.1em;
-            font-weight: 600;
-            color: #d29922;
-            margin-bottom: 10px;
-        }
-        .auction-box .info { color: #8b949e; margin-bottom: 4px; }
-        .auction-box .info strong { color: #f0f6fc; }
-        .auction-box .btn-group {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-            flex-wrap: wrap;
-        }
-        .auction-box .btn-group .btn {
-            flex: 1;
-            min-width: 70px;
-            padding: 6px 12px;
-            font-size: 0.8em;
-        }
-        .timer-bar {
-            width: 100%;
-            height: 3px;
-            background: #161b22;
-            border-radius: 2px;
-            overflow: hidden;
-            margin: 8px 0 4px;
-        }
-        .timer-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #238636, #d29922, #da3633);
-            transition: width 1s linear;
-        }
-        .game-over {
-            background: #0d1117;
-            border: 1px solid #d29922;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 16px 0;
-            text-align: center;
-        }
-        .game-over .title {
-            font-size: 1.6em;
-            font-weight: 600;
-            color: #d29922;
-            margin-bottom: 10px;
-        }
-        .game-over .message { color: #8b949e; font-size: 1em; margin-bottom: 14px; }
-        .game-over .result-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin: 12px 0;
-        }
-        .game-over .result-player {
-            background: #161b22;
-            padding: 14px;
-            border-radius: 8px;
-            text-align: left;
-        }
-        .game-over .result-player .name {
-            font-weight: 600;
-            color: #f0f6fc;
-            margin-bottom: 6px;
-        }
-        .game-over .result-player .detail {
-            color: #8b949e;
-            font-size: 0.85em;
-            margin: 2px 0;
-        }
-        .game-over .result-player .detail strong { color: #f0f6fc; }
-        .join-screen {
-            text-align: center;
-            padding: 40px 20px;
-        }
-        .join-screen .title {
-            font-size: 1.6em;
-            font-weight: 300;
-            color: #f0f6fc;
-            margin-bottom: 8px;
-        }
-        .join-screen .subtitle { color: #8b949e; margin-bottom: 20px; }
-        .join-screen .btn-group {
-            display: flex;
-            gap: 16px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .join-screen .btn-group .btn {
-            padding: 10px 28px;
-            font-size: 1em;
-            min-width: 100px;
-        }
-        .empty-state { color: #484f58; text-align: center; padding: 16px; font-style: italic; font-size: 0.9em; }
-        @media (max-width: 768px) {
-            .container { padding: 16px; }
-            .players-grid { grid-template-columns: 1fr; }
-            .container-grid { grid-template-columns: 1fr 1fr; }
-            .header h1 { font-size: 1.4em; }
-            .status-bar { font-size: 0.75em; gap: 6px; }
-            .game-over .result-details { grid-template-columns: 1fr; }
-            .actions-group .btn { min-width: 70px; font-size: 0.75em; padding: 6px 10px; }
-        }
-        @media (max-width: 480px) {
-            .container-grid { grid-template-columns: 1fr; }
-            .player-stats { grid-template-columns: 1fr 1fr; }
-            .header h1 { font-size: 1.2em; }
+        @media(max-width:480px){
+            .grid{grid-template-columns:1fr;}
+            .stats{grid-template-columns:1fr 1fr;}
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>КОНТ<span>ЕЙНЕРЫ</span></h1>
+<div class="container">
+    <div class="header"><h1>КОНТ<span>ЕЙНЕРЫ</span></h1></div>
+
+    <div id="app">
+        <!-- JOIN -->
+        <div id="joinScreen" class="join">
+            <div class="title">Добро пожаловать</div>
+            <div class="sub">Выберите игрока</div>
+            <div class="btns">
+                <button class="btn green" onclick="join('p1')">Игрок 1</button>
+                <button class="btn gray" onclick="join('p2')">Игрок 2</button>
+            </div>
+            <div style="margin-top:12px;color:#484f58;font-size:0.8em;">Подключайтесь с разных устройств</div>
         </div>
 
-        <div id="app">
-            <!-- JOIN -->
-            <div id="joinScreen" class="join-screen">
-                <div class="title">Добро пожаловать</div>
-                <div class="subtitle">Выберите игрока</div>
-                <div class="btn-group">
-                    <button class="btn btn-primary" onclick="joinGame('player1')">Игрок 1</button>
-                    <button class="btn btn-secondary" onclick="joinGame('player2')">Игрок 2</button>
-                </div>
-                <div style="margin-top:16px;color:#484f58;font-size:0.8em;">Подключайтесь с разных устройств</div>
+        <!-- GAME -->
+        <div id="gameScreen" style="display:none;">
+            <div class="status">
+                <span class="round" id="roundInfo">Раунд: 0 / 3</span>
+                <span class="player" id="playerInfo">Вы: --</span>
+                <span class="timer" id="timerDisplay">--</span>
             </div>
 
-            <!-- GAME -->
-            <div id="gameScreen" style="display:none;">
-                <div class="status-bar">
-                    <span class="round" id="roundInfo">Раунд: 0 / 3</span>
-                    <span class="player" id="playerInfo">Вы: --</span>
-                    <span class="timer" id="timerDisplay">--</span>
-                </div>
+            <div class="msg" id="msgBox">Загрузка...</div>
 
-                <div class="message-box" id="messageBox">Загрузка...</div>
-
-                <div class="players-grid">
-                    <div class="player-card" id="player1Card">
-                        <div class="name"><span id="p1Name">Игрок 1</span><span class="badge" id="p1Badge"></span></div>
-                        <div class="player-stats">
-                            <div class="stat"><div class="label">Фишки</div><div class="value chips" id="p1Chips">150</div></div>
-                            <div class="stat"><div class="label">Очки</div><div class="value hidden" id="p1Score">?</div></div>
-                            <div class="stat"><div class="label">Конт.</div><div class="value containers" id="p1Containers">0</div></div>
-                        </div>
-                        <div class="containers-list" id="p1ContainersList"></div>
-                        <div class="abilities">
-                            <span>Рентген: <span id="p1Xray">доступен</span></span>
-                            <span>Перехват: <span id="p1Intercept">доступен</span></span>
-                        </div>
+            <div class="players">
+                <div class="card" id="p1card">
+                    <div class="name"><span id="p1name">Игрок 1</span><span class="badge" id="p1badge"></span></div>
+                    <div class="stats">
+                        <div class="stat"><div class="lbl">Фишки</div><div class="val chips" id="p1chips">150</div></div>
+                        <div class="stat"><div class="lbl">Очки</div><div class="val hidden" id="p1score">?</div></div>
+                        <div class="stat"><div class="lbl">Конт.</div><div class="val containers" id="p1count">0</div></div>
                     </div>
-
-                    <div class="player-card" id="player2Card">
-                        <div class="name"><span id="p2Name">Игрок 2</span><span class="badge" id="p2Badge"></span></div>
-                        <div class="player-stats">
-                            <div class="stat"><div class="label">Фишки</div><div class="value chips" id="p2Chips">150</div></div>
-                            <div class="stat"><div class="label">Очки</div><div class="value hidden" id="p2Score">?</div></div>
-                            <div class="stat"><div class="label">Конт.</div><div class="value containers" id="p2Containers">0</div></div>
-                        </div>
-                        <div class="containers-list" id="p2ContainersList"></div>
-                        <div class="abilities">
-                            <span>Рентген: <span id="p2Xray">доступен</span></span>
-                            <span>Перехват: <span id="p2Intercept">доступен</span></span>
-                        </div>
+                    <div class="clist" id="p1list"></div>
+                    <div class="abilities">
+                        <span>Рентген: <span id="p1xray">доступен</span></span>
+                        <span>Перехват: <span id="p1intercept">доступен</span></span>
                     </div>
                 </div>
 
-                <div id="containersArea">
-                    <div class="section-title">Контейнеры на столе</div>
-                    <div id="containersGrid" class="container-grid"></div>
-                </div>
-
-                <div id="auctionArea" style="display:none;">
-                    <div class="auction-box">
-                        <div class="title">АУКЦИОН</div>
-                        <div id="auctionInfo" class="info"></div>
-                        <div class="btn-group">
-                            <button class="btn btn-warning" onclick="auctionAction('raise')">Повысить (+10)</button>
-                            <button class="btn btn-danger" onclick="auctionAction('pass')">Пас</button>
-                            <button class="btn btn-success" onclick="auctionAction('buy')">Купить</button>
-                        </div>
+                <div class="card" id="p2card">
+                    <div class="name"><span id="p2name">Игрок 2</span><span class="badge" id="p2badge"></span></div>
+                    <div class="stats">
+                        <div class="stat"><div class="lbl">Фишки</div><div class="val chips" id="p2chips">150</div></div>
+                        <div class="stat"><div class="lbl">Очки</div><div class="val hidden" id="p2score">?</div></div>
+                        <div class="stat"><div class="lbl">Конт.</div><div class="val containers" id="p2count">0</div></div>
+                    </div>
+                    <div class="clist" id="p2list"></div>
+                    <div class="abilities">
+                        <span>Рентген: <span id="p2xray">доступен</span></span>
+                        <span>Перехват: <span id="p2intercept">доступен</span></span>
                     </div>
                 </div>
+            </div>
 
-                <div class="actions-group">
-                    <button class="btn btn-primary" onclick="startGame()" id="startBtn">Начать игру</button>
-                    <button class="btn btn-success" onclick="nextRound()" id="nextRoundBtn" style="display:none;">Следующий раунд</button>
-                    <button class="btn btn-purple" onclick="useIntercept()" id="interceptBtn">Перехват</button>
-                    <button class="btn btn-pink" onclick="resetGame()" id="resetBtn">Новая игра</button>
-                </div>
+            <div class="section">Контейнеры на столе</div>
+            <div class="grid" id="grid"></div>
 
-                <div class="timer-bar"><div class="timer-fill" id="timerFill" style="width:100%"></div></div>
-
-                <div id="gameOverScreen" style="display:none;">
-                    <div class="game-over">
-                        <div class="title">ИГРА ОКОНЧЕНА</div>
-                        <div class="message" id="gameOverMessage"></div>
-                        <div class="result-details" id="resultDetails"></div>
-                        <button class="btn btn-success" onclick="resetGame()" style="padding:8px 28px;font-size:0.95em;">Новая игра</button>
+            <div id="auctionArea" style="display:none;">
+                <div class="auction">
+                    <div class="title">АУКЦИОН</div>
+                    <div class="info" id="auctionInfo"></div>
+                    <div class="btns">
+                        <button class="btn yellow" onclick="auction('raise')">Повысить (+10)</button>
+                        <button class="btn red" onclick="auction('pass')">Пас</button>
+                        <button class="btn green" onclick="auction('buy')">Купить</button>
                     </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button class="btn green" onclick="startGame()" id="startBtn">Начать игру</button>
+                <button class="btn blue" onclick="nextRound()" id="nextBtn" style="display:none;">Следующий раунд</button>
+                <button class="btn purple" onclick="intercept()" id="interceptBtn">Перехват</button>
+                <button class="btn pink" onclick="resetGame()" id="resetBtn">Новая игра</button>
+            </div>
+
+            <div class="bar"><div class="fill" id="timerFill" style="width:100%"></div></div>
+
+            <div id="overScreen" style="display:none;">
+                <div class="over">
+                    <div class="title">ИГРА ОКОНЧЕНА</div>
+                    <div class="msg" id="overMsg"></div>
+                    <div class="details" id="overDetails"></div>
+                    <button class="btn green" onclick="resetGame()" style="padding:6px 24px;">Новая игра</button>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <script>
-        let socket = null, playerId = null, gameId = 'default', gameState = null, myContainers = [];
+<script>
+let socket = null, pid = null, gid = 'default', state = null, myItems = [];
 
-        function joinGame(pId) {
-            playerId = pId;
-            document.getElementById('joinScreen').style.display = 'none';
-            document.getElementById('gameScreen').style.display = 'block';
+function join(p) {
+    pid = p;
+    document.getElementById('joinScreen').style.display = 'none';
+    document.getElementById('gameScreen').style.display = 'block';
 
-            socket = io();
+    socket = io();
 
-            socket.on('connect', function() {
-                socket.emit('join_game', { game_id: gameId, player_id: playerId });
-            });
+    socket.on('connect', function() {
+        socket.emit('join', { gid: gid, pid: pid });
+    });
 
-            socket.on('player_assigned', function(data) {
-                document.getElementById('playerInfo').textContent = 'Вы: ' + data.name;
-                const card = document.getElementById(data.player_id + 'Card');
-                if (card) card.classList.add('you');
-                const badge = document.getElementById(data.player_id + 'Badge');
-                if (badge) badge.textContent = 'вы';
-            });
+    socket.on('assigned', function(data) {
+        document.getElementById('playerInfo').textContent = 'Вы: ' + data.name;
+        const card = document.getElementById(data.pid + 'card');
+        if (card) card.classList.add('you');
+        const badge = document.getElementById(data.pid + 'badge');
+        if (badge) badge.textContent = 'вы';
+    });
 
-            socket.on('game_ready', function(data) {
-                showMessage('success', data.message + ' Нажмите "Начать игру"');
-                document.getElementById('startBtn').disabled = false;
-            });
+    socket.on('ready', function(data) {
+        msg('ok', data.msg + ' Нажмите "Начать игру"');
+        document.getElementById('startBtn').disabled = false;
+    });
 
-            socket.on('game_state', function(state) { updateGame(state); });
+    socket.on('state', function(s) { update(s); });
 
-            socket.on('xray_result', function(data) {
-                showMessage('success', 'Рентген: ' + data.type + ' (' + data.value + ' очков)');
-            });
+    socket.on('xray_result', function(data) {
+        msg('ok', 'Рентген: ' + data.item + ' (' + data.value + ' очков)');
+    });
 
-            socket.on('purchase_result', function(data) {
-                showMessage('success', 'Вы купили: ' + data.type + ' (' + data.value + ' очков)');
-                myContainers.push(data.type);
-                updateMyContainers();
-            });
+    socket.on('bought', function(data) {
+        msg('ok', 'Вы купили: ' + data.item + ' (' + data.value + ' очков)');
+        myItems.push(data.item);
+        updateMy();
+    });
 
-            socket.on('intercept_result', function(data) {
-                showMessage('success', 'Перехват: ' + data.type + ' (' + data.value + ' очков)');
-                myContainers.push(data.type);
-                updateMyContainers();
-            });
+    socket.on('intercept_result', function(data) {
+        msg('ok', 'Перехват: ' + data.item + ' (' + data.value + ' очков)');
+        myItems.push(data.item);
+        updateMy();
+    });
 
-            socket.on('error', function(data) { showMessage('error', data.message); });
-            socket.on('player_disconnected', function(data) { showMessage('warning', data.player_id + ' отключился'); });
-            socket.on('disconnect', function() { showMessage('error', 'Соединение потеряно'); });
-        }
+    socket.on('player_disconnected', function(data) {
+        msg('warn', data.pid + ' отключился');
+    });
 
-        function showMessage(type, text) {
-            const box = document.getElementById('messageBox');
-            box.textContent = text;
-            box.className = 'message-box ' + type;
-        }
+    socket.on('error', function(data) { msg('err', data.msg); });
+    socket.on('disconnect', function() { msg('err', 'Соединение потеряно'); });
+}
 
-        function updateMyContainers() {
-            const prefix = playerId === 'player1' ? 'p1' : 'p2';
-            const list = document.getElementById(prefix + 'ContainersList');
-            list.innerHTML = '';
-            if (myContainers.length === 0) {
-                const span = document.createElement('span');
-                span.className = 'empty-state';
-                span.textContent = 'пусто';
-                list.appendChild(span);
-            } else {
-                myContainers.forEach(c => {
-                    const tag = document.createElement('span');
-                    tag.className = 'container-tag yours';
-                    tag.textContent = c;
-                    list.appendChild(tag);
-                });
-            }
-        }
+function msg(type, text) {
+    const box = document.getElementById('msgBox');
+    box.textContent = text;
+    box.className = 'msg';
+    if (type === 'ok') box.classList.add('ok');
+    else if (type === 'err') box.classList.add('err');
+    else if (type === 'warn') box.classList.add('warn');
+}
 
-        function updateGame(state) {
-            gameState = state;
-            document.getElementById('roundInfo').textContent = 'Раунд: ' + state.current_round + ' / ' + state.max_rounds;
-            if (state.message) showMessage('info', state.message);
+function updateMy() {
+    const id = pid === 'p1' ? 'p1' : 'p2';
+    const list = document.getElementById(id + 'list');
+    list.innerHTML = '';
+    if (myItems.length === 0) {
+        const span = document.createElement('span');
+        span.className = 'empty';
+        span.textContent = 'пусто';
+        list.appendChild(span);
+    } else {
+        myItems.forEach(item => {
+            const tag = document.createElement('span');
+            tag.className = 'tag yours';
+            tag.textContent = item;
+            list.appendChild(tag);
+        });
+    }
+}
 
-            updatePlayer('player1', state.players.player1);
-            updatePlayer('player2', state.players.player2);
-            updateContainers(state.containers);
+function update(s) {
+    state = s;
+    document.getElementById('roundInfo').textContent = 'Раунд: ' + s.round + ' / ' + s.max;
+    if (s.msg) msg('info', s.msg);
 
-            // Аукцион
-            if (state.auction_active) {
-                document.getElementById('auctionArea').style.display = 'block';
-                const a = state.auction;
-                let timeLeft = state.auction_time_remaining ? Math.ceil(state.auction_time_remaining) : 0;
-                document.getElementById('auctionInfo').innerHTML = `
-                    <div>Ставка: <strong>${a.current_price}</strong> фишек</div>
-                    <div>Повышений: ${a.raise_count} / ${a.max_raises}</div>
-                    <div>${a.current_bidder ? 'Лидер: ' + state.players[a.current_bidder].name : 'Ожидание'}</div>
-                    <div style="color:#484f58;font-size:0.8em;margin-top:4px;">⏱️ ${timeLeft}с</div>
-                `;
-            } else {
-                document.getElementById('auctionArea').style.display = 'none';
-            }
+    updatePlayer('p1', s.players.p1);
+    updatePlayer('p2', s.players.p2);
+    updateContainers(s.containers);
 
-            // Таймер
-            if (state.time_remaining !== undefined && !state.round_ended) {
-                const pct = (state.time_remaining / 30) * 100;
-                document.getElementById('timerFill').style.width = pct + '%';
-                document.getElementById('timerDisplay').textContent = Math.ceil(state.time_remaining) + 'с';
-            } else if (state.round_ended) {
-                document.getElementById('timerDisplay').textContent = '✅';
-            }
+    // Auction
+    if (s.auction) {
+        document.getElementById('auctionArea').style.display = 'block';
+        const a = s.auction_data;
+        const time = s.auction_time ? Math.ceil(s.auction_time) : 0;
+        document.getElementById('auctionInfo').innerHTML = `
+            <div>Ставка: <strong>${a.price}</strong> фишек</div>
+            <div>Повышений: ${a.raises} / ${a.max}</div>
+            <div>${a.leader ? 'Лидер: ' + s.players[a.leader].name : 'Ожидание'}</div>
+            <div style="color:#484f58;font-size:0.8em;margin-top:4px;">⏱️ ${time}с</div>
+        `;
+    } else {
+        document.getElementById('auctionArea').style.display = 'none';
+    }
 
-            // Game Over
-            if (state.game_over) {
-                document.getElementById('gameOverScreen').style.display = 'block';
-                document.getElementById('gameOverMessage').textContent = state.message;
-                const details = document.getElementById('resultDetails');
-                details.innerHTML = `
-                    <div class="result-player">
-                        <div class="name">${state.players.player1.name}</div>
-                        <div class="detail">Контейнеров: <strong>${state.players.player1.containers_count}</strong></div>
-                        <div class="detail">Очки: <strong>${state.players.player1.score}</strong></div>
-                        <div class="detail">Фишки: <strong>${state.players.player1.chips}</strong></div>
-                        <div class="detail">Контейнеры: <strong>${state.players.player1.containers.join(', ') || 'нет'}</strong></div>
-                    </div>
-                    <div class="result-player">
-                        <div class="name">${state.players.player2.name}</div>
-                        <div class="detail">Контейнеров: <strong>${state.players.player2.containers_count}</strong></div>
-                        <div class="detail">Очки: <strong>${state.players.player2.score}</strong></div>
-                        <div class="detail">Фишки: <strong>${state.players.player2.chips}</strong></div>
-                        <div class="detail">Контейнеры: <strong>${state.players.player2.containers.join(', ') || 'нет'}</strong></div>
-                    </div>
-                `;
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('interceptBtn').disabled = true;
-                document.getElementById('nextRoundBtn').style.display = 'none';
-            } else {
-                document.getElementById('gameOverScreen').style.display = 'none';
-            }
+    // Timer
+    if (s.time !== undefined && !s.round_done) {
+        const pct = (s.time / 30) * 100;
+        document.getElementById('timerFill').style.width = pct + '%';
+        document.getElementById('timerDisplay').textContent = Math.ceil(s.time) + 'с';
+    } else if (s.round_done) {
+        document.getElementById('timerDisplay').textContent = '✅';
+    } else {
+        document.getElementById('timerDisplay').textContent = '--';
+    }
 
-            // Следующий раунд
-            if (state.waiting_for_next && !state.game_over) {
-                document.getElementById('nextRoundBtn').style.display = 'block';
-            } else {
-                document.getElementById('nextRoundBtn').style.display = 'none';
-            }
-
-            // Перехват
-            const you = state.players[playerId];
-            if (you) {
-                document.getElementById('interceptBtn').disabled = you.used_intercept || state.game_over || !state.started;
-            }
-            document.getElementById('resetBtn').disabled = false;
-        }
-
-        function updatePlayer(id, data) {
-            const prefix = id === 'player1' ? 'p1' : 'p2';
-            const isYou = id === playerId;
-
-            document.getElementById(prefix + 'Name').textContent = data.name;
-            document.getElementById(prefix + 'Chips').textContent = data.chips;
-
-            const scoreEl = document.getElementById(prefix + 'Score');
-            if (gameState && gameState.game_over) {
-                scoreEl.textContent = data.score;
-                scoreEl.className = 'value score';
-            } else {
-                scoreEl.textContent = '?';
-                scoreEl.className = 'value hidden';
-            }
-            document.getElementById(prefix + 'Containers').textContent = data.containers_count;
-
-            // Контейнеры
-            const list = document.getElementById(prefix + 'ContainersList');
-            list.innerHTML = '';
-            if (isYou) {
-                if (myContainers.length === 0) {
-                    const span = document.createElement('span');
-                    span.className = 'empty-state';
-                    span.textContent = 'пусто';
-                    list.appendChild(span);
-                } else {
-                    myContainers.forEach(c => {
-                        const tag = document.createElement('span');
-                        tag.className = 'container-tag yours';
-                        tag.textContent = c;
-                        list.appendChild(tag);
-                    });
-                }
-            } else {
-                if (data.containers_count > 0) {
-                    const tag = document.createElement('span');
-                    tag.className = 'container-tag hidden';
-                    tag.textContent = 'скрыто (' + data.containers_count + ' шт.)';
-                    list.appendChild(tag);
-                } else {
-                    const span = document.createElement('span');
-                    span.className = 'empty-state';
-                    span.textContent = 'пусто';
-                    list.appendChild(span);
-                }
-            }
-
-            // Способности
-            const xEl = document.getElementById(prefix + 'Xray');
-            const iEl = document.getElementById(prefix + 'Intercept');
-            xEl.textContent = data.used_xray ? 'использован' : 'доступен';
-            xEl.className = data.used_xray ? 'used' : 'available';
-            iEl.textContent = data.used_intercept ? 'использован' : 'доступен';
-            iEl.className = data.used_intercept ? 'used' : 'available';
-        }
-
-        function updateContainers(containers) {
-            const grid = document.getElementById('containersGrid');
-            grid.innerHTML = '';
-            if (!containers || containers.length === 0) {
-                const div = document.createElement('div');
-                div.className = 'empty-state';
-                div.textContent = 'Нет доступных контейнеров';
-                grid.appendChild(div);
-                return;
-            }
-            containers.forEach(c => {
-                const div = document.createElement('div');
-                div.className = 'container-item';
-                div.innerHTML = `
-                    <div class="price">${c.price}</div>
-                    <div class="label">фишек</div>
-                    <div class="hidden-label">содержимое скрыто</div>
-                    <div class="btn-group">
-                        <button class="btn btn-primary" onclick="buyContainer(${c.id})">Купить</button>
-                        <button class="btn btn-secondary" onclick="useXray(${c.id})">Рентген</button>
-                    </div>
-                `;
-                grid.appendChild(div);
-            });
-        }
-
-        function startGame() { socket.emit('start_game', {}); document.getElementById('startBtn').disabled = true; }
-        function buyContainer(id) { socket.emit('buy_container', { player_id: playerId, container_id: id }); }
-        function useXray(id) { socket.emit('use_xray', { player_id: playerId, container_id: id }); }
-        function useIntercept() { socket.emit('use_intercept', { player_id: playerId }); }
-        function auctionAction(action) { socket.emit('auction_bid', { player_id: playerId, action: action }); }
-        function nextRound() { socket.emit('next_round', {}); }
-        
-        function resetGame() {
-            if (confirm('Начать новую игру?')) {
-                myContainers = [];
-                socket.emit('reset_game', {});
-                document.getElementById('gameOverScreen').style.display = 'none';
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('interceptBtn').disabled = false;
-                document.getElementById('nextRoundBtn').style.display = 'none';
-                showMessage('info', 'Новая игра');
-                setTimeout(() => location.reload(), 500);
-            }
-        }
-
+    // Game Over
+    if (s.over) {
+        document.getElementById('overScreen').style.display = 'block';
+        document.getElementById('overMsg').textContent = s.msg;
+        const details = document.getElementById('overDetails');
+        details.innerHTML = `
+            <div class="player">
+                <div class="name">${s.players.p1.name}</div>
+                <div class="line">Контейнеров: <strong>${s.players.p1.count}</strong></div>
+                <div class="line">Очки: <strong>${s.players.p1.score}</strong></div>
+                <div class="line">Фишки: <strong>${s.players.p1.chips}</strong></div>
+                <div class="line">Контейнеры: <strong>${s.players.p1.containers.join(', ') || 'нет'}</strong></div>
+            </div>
+            <div class="player">
+                <div class="name">${s.players.p2.name}</div>
+                <div class="line">Контейнеров: <strong>${s.players.p2.count}</strong></div>
+                <div class="line">Очки: <strong>${s.players.p2.score}</strong></div>
+                <div class="line">Фишки: <strong>${s.players.p2.chips}</strong></div>
+                <div class="line">Контейнеры: <strong>${s.players.p2.containers.join(', ') || 'нет'}</strong></div>
+            </div>
+        `;
         document.getElementById('startBtn').disabled = true;
-    </script>
+        document.getElementById('interceptBtn').disabled = true;
+        document.getElementById('nextBtn').style.display = 'none';
+    } else {
+        document.getElementById('overScreen').style.display = 'none';
+    }
+
+    // Next round
+    if (s.waiting && !s.over) {
+        document.getElementById('nextBtn').style.display = 'block';
+    } else {
+        document.getElementById('nextBtn').style.display = 'none';
+    }
+
+    // Intercept
+    const you = s.players[pid];
+    if (you) {
+        document.getElementById('interceptBtn').disabled = you.intercept || s.over || !s.started;
+    }
+    document.getElementById('resetBtn').disabled = false;
+}
+
+function updatePlayer(id, data) {
+    const p = id === 'p1' ? '1' : '2';
+    const isYou = id === pid;
+
+    document.getElementById('p' + p + 'name').textContent = data.name;
+    document.getElementById('p' + p + 'chips').textContent = data.chips;
+
+    const score = document.getElementById('p' + p + 'score');
+    if (state && state.over) {
+        score.textContent = data.score;
+        score.className = 'val score';
+    } else {
+        score.textContent = '?';
+        score.className = 'val hidden';
+    }
+    document.getElementById('p' + p + 'count').textContent = data.count;
+
+    // Containers list
+    const list = document.getElementById('p' + p + 'list');
+    list.innerHTML = '';
+    if (isYou) {
+        if (myItems.length === 0) {
+            const span = document.createElement('span');
+            span.className = 'empty';
+            span.textContent = 'пусто';
+            list.appendChild(span);
+        } else {
+            myItems.forEach(item => {
+                const tag = document.createElement('span');
+                tag.className = 'tag yours';
+                tag.textContent = item;
+                list.appendChild(tag);
+            });
+        }
+    } else {
+        if (data.count > 0) {
+            const tag = document.createElement('span');
+            tag.className = 'tag hidden';
+            tag.textContent = 'скрыто (' + data.count + ' шт.)';
+            list.appendChild(tag);
+        } else {
+            const span = document.createElement('span');
+            span.className = 'empty';
+            span.textContent = 'пусто';
+            list.appendChild(span);
+        }
+    }
+
+    // Abilities
+    const x = document.getElementById('p' + p + 'xray');
+    const i = document.getElementById('p' + p + 'intercept');
+    x.textContent = data.xray ? 'использован' : 'доступен';
+    x.className = data.xray ? 'used' : 'avail';
+    i.textContent = data.intercept ? 'использован' : 'доступен';
+    i.className = data.intercept ? 'used' : 'avail';
+}
+
+function updateContainers(containers) {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    if (!containers || containers.length === 0) {
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = 'Нет доступных контейнеров';
+        grid.appendChild(div);
+        return;
+    }
+    containers.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `
+            <div class="price">${c.price}</div>
+            <div class="lbl">фишек</div>
+            <div class="hidden">содержимое скрыто</div>
+            <div class="btns">
+                <button class="btn green" onclick="buy(${c.id})">Купить</button>
+                <button class="btn gray" onclick="xray(${c.id})">Рентген</button>
+            </div>
+        `;
+        grid.appendChild(div);
+    });
+}
+
+function startGame() { socket.emit('start', {}); document.getElementById('startBtn').disabled = true; }
+function buy(cid) { socket.emit('buy', { pid: pid, cid: cid }); }
+function xray(cid) { socket.emit('xray', { pid: pid, cid: cid }); }
+function intercept() { socket.emit('intercept', { pid: pid }); }
+function auction(action) { socket.emit('auction', { pid: pid, action: action }); }
+function nextRound() { socket.emit('next_round', {}); }
+
+function resetGame() {
+    if (confirm('Начать новую игру?')) {
+        myItems = [];
+        socket.emit('reset', {});
+        document.getElementById('overScreen').style.display = 'none';
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('interceptBtn').disabled = false;
+        document.getElementById('nextBtn').style.display = 'none';
+        msg('info', 'Новая игра');
+        setTimeout(() => location.reload(), 500);
+    }
+}
+
+document.getElementById('startBtn').disabled = true;
+</script>
 </body>
 </html>
