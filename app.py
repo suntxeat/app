@@ -44,6 +44,7 @@ AUCTION_TIMEOUT = 40
 
 games = {}
 game_players = {}
+timers = {}
 
 class Game:
     def __init__(self):
@@ -69,8 +70,7 @@ class Game:
         self.waiting = False
         self.round_start = 0
         self.auction_start = 0
-        self.timer_thread = None
-        self.running = True
+        self.timer_running = False
         
     def create_pool(self):
         pool = []
@@ -151,7 +151,6 @@ class Game:
             self.message = "Перехват уже использован"
             return False
         
-        # Ищем последний купленный контейнер
         last = None
         for c in reversed(self.containers):
             if c['bought'] and c['buyer'] == other:
@@ -162,7 +161,6 @@ class Game:
             self.message = "Нет контейнеров для перехвата"
             return False
         
-        # Перехват
         other_player['containers'].remove(last['item'])
         other_player['chips'] += last['price']
         player['containers'].append(last['item'])
@@ -205,7 +203,6 @@ class Game:
             self.message = "Контейнер уже куплен"
             return False
         
-        # Таймаут аукциона
         if time.time() - self.auction_start > AUCTION_TIMEOUT:
             self.auction = None
             if auction['leader']:
@@ -273,6 +270,7 @@ class Game:
         if not available:
             self.round_done = True
             self.waiting = True
+            self.timer_running = False
             if not self.game_over:
                 self.message = "Все контейнеры куплены!"
             return True
@@ -282,6 +280,7 @@ class Game:
                 c['bought'] = True
             self.round_done = True
             self.waiting = True
+            self.timer_running = False
             if not self.game_over:
                 self.message = "Время вышло!"
             return True
@@ -290,7 +289,6 @@ class Game:
     
     def check_game(self):
         if self.round >= MAX_ROUNDS and self.waiting:
-            # Считаем очки
             for p in self.players.values():
                 p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
             
@@ -313,6 +311,7 @@ class Game:
                     self.winner = 'draw'
             
             self.game_over = True
+            self.timer_running = False
             return True
         return False
     
@@ -323,13 +322,58 @@ class Game:
         self.round += 1
         self.containers = self.generate_containers()
         self.round_start = time.time()
+        self.timer_running = True
         self.auction = None
         self.round_done = False
         self.waiting = False
         self.message = f"Раунд {self.round}"
 
 # ---------------------------
-# 3. ОБРАБОТЧИКИ
+# 3. ТАЙМЕР
+# ---------------------------
+
+def start_timer(gid):
+    if gid in timers:
+        return
+    
+    def timer_loop():
+        while gid in games:
+            game = games.get(gid)
+            if not game:
+                break
+            
+            if not game.started or game.game_over:
+                time.sleep(1)
+                continue
+            
+            # Обновляем состояние каждую секунду
+            if not game.round_done:
+                game.check_round()
+            
+            if game.auction:
+                if time.time() - game.auction_start > AUCTION_TIMEOUT:
+                    cid = game.auction['id']
+                    container = next((c for c in game.containers if c['id'] == cid), None)
+                    if container and not container['bought']:
+                        if game.auction['leader']:
+                            game.buy(game.auction['leader'], cid)
+                            game.message = f"Время вышло! {game.players[game.auction['leader']]['name']} забирает"
+                        else:
+                            container['bought'] = True
+                            game.message = "Время аукциона вышло!"
+                    game.auction = None
+                    game.check_round()
+            
+            # Отправляем состояние
+            send_state(gid)
+            time.sleep(1)
+    
+    thread = threading.Thread(target=timer_loop, daemon=True)
+    thread.start()
+    timers[gid] = thread
+
+# ---------------------------
+# 4. ОБРАБОТЧИКИ
 # ---------------------------
 
 @app.route('/')
@@ -399,9 +443,8 @@ def start(data):
     if not game.started:
         game.started = True
         game.next_round()
-        send_state(gid)
-        # Запускаем таймер
         start_timer(gid)
+        send_state(gid)
 
 @socketio.on('buy')
 def buy(data):
@@ -468,7 +511,6 @@ def intercept(data):
         emit('error', {'msg': 'Игра не активна'})
         return
     
-    # Сохраняем данные до перехвата
     other = 'p2' if pid == 'p1' else 'p1'
     last = None
     for c in reversed(game.containers):
@@ -505,7 +547,6 @@ def auction(data):
     cid = game.auction['id']
     game.auction_bid(pid, action)
     
-    # Если аукцион завершился с покупкой
     if not game.auction:
         container = next((c for c in game.containers if c['id'] == cid), None)
         if container and container['bought']:
@@ -531,13 +572,16 @@ def next_round(data):
     if game.waiting:
         game.next_round()
         send_state(gid)
-        start_timer(gid)
 
 @socketio.on('reset')
 def reset(data):
     gid = game_players.get(request.sid)
     if not gid or gid not in games:
         return
+    
+    # Останавливаем старый таймер
+    if gid in timers:
+        del timers[gid]
     
     games[gid] = Game()
     game = games[gid]
@@ -609,43 +653,8 @@ def send_state(gid):
     
     emit('state', state, room=gid)
 
-def start_timer(gid):
-    """Запускает поток для обновления таймера"""
-    def timer_loop():
-        while gid in games:
-            game = games[gid]
-            if not game.started or game.game_over:
-                break
-            
-            # Проверяем раунд
-            if not game.round_done:
-                game.check_round()
-                send_state(gid)
-            
-            # Проверяем аукцион
-            if game.auction:
-                if time.time() - game.auction_start > AUCTION_TIMEOUT:
-                    # Таймаут аукциона
-                    cid = game.auction['id']
-                    container = next((c for c in game.containers if c['id'] == cid), None)
-                    if container and not container['bought']:
-                        if game.auction['leader']:
-                            game.buy(game.auction['leader'], cid)
-                            game.message = f"Время вышло! {game.players[game.auction['leader']]['name']} забирает"
-                        else:
-                            container['bought'] = True
-                            game.message = "Время аукциона вышло!"
-                    game.auction = None
-                    game.check_round()
-                    send_state(gid)
-            
-            time.sleep(1)
-    
-    thread = threading.Thread(target=timer_loop, daemon=True)
-    thread.start()
-
 # ---------------------------
-# 4. ЗАПУСК
+# 5. ЗАПУСК
 # ---------------------------
 
 if __name__ == '__main__':
