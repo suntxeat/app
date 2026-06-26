@@ -71,6 +71,7 @@ class Game:
         self.round_start = 0
         self.auction_start = 0
         self.timer_running = False
+        self.auction_started = False  # Флаг для аукциона
         
     def create_pool(self):
         pool = []
@@ -171,7 +172,8 @@ class Game:
         return True
     
     def start_auction(self, cid):
-        container = next((c for c in self.containers if c['id'] == cid), None)
+        """Запускает аукцион автоматически при 1 контейнере"""
+        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
         if not container:
             return False
         
@@ -184,11 +186,13 @@ class Game:
             'start': time.time()
         }
         self.auction_start = time.time()
+        self.auction_started = True
         self.message = f"Аукцион! Старт: {container['price']} фишек"
         return True
     
     def auction_bid(self, pid, action):
         if not self.auction:
+            self.message = "Аукцион не активен"
             return False
         
         player = self.players[pid]
@@ -203,24 +207,26 @@ class Game:
             self.message = "Контейнер уже куплен"
             return False
         
+        # Проверка таймаута аукциона
         if time.time() - self.auction_start > AUCTION_TIMEOUT:
             self.auction = None
+            self.auction_started = False
             if auction['leader']:
                 if self.buy(auction['leader'], container['id']):
-                    self.message = f"Время вышло! {self.players[auction['leader']]['name']} забирает"
+                    self.message = f"Время вышло! {self.players[auction['leader']]['name']} забирает контейнер"
             else:
                 container['bought'] = True
-                self.message = "Время аукциона вышло!"
+                self.message = "Время аукциона вышло! Контейнер ушел в сброс"
             self.check_round()
             return True
         
         if action == 'raise':
             if auction['raises'] >= AUCTION_MAX_RAISES:
-                self.message = "Лимит повышений (3)"
+                self.message = "Достигнут лимит повышений (3)"
                 return False
             
             if player['chips'] < auction['price'] + AUCTION_STEP:
-                self.message = "Не хватает фишек"
+                self.message = "Не хватает фишек для повышения"
                 return False
             
             auction['price'] += AUCTION_STEP
@@ -232,6 +238,7 @@ class Game:
             if auction['raises'] >= AUCTION_MAX_RAISES:
                 if self.buy(pid, container['id']):
                     self.auction = None
+                    self.auction_started = False
                     self.message = f"{player['name']} выиграл аукцион!"
                     self.check_round()
             return True
@@ -240,15 +247,25 @@ class Game:
             auction['passed'].append(pid)
             self.message = f"{player['name']} пасует"
             
+            # Если оба пасовали или один пасовал, а второй автоматически получает
             if len(auction['passed']) >= 2:
                 self.auction = None
-                if auction['leader']:
-                    if self.buy(auction['leader'], container['id']):
-                        self.message = f"{self.players[auction['leader']]['name']} выиграл аукцион!"
-                else:
-                    container['bought'] = True
-                    self.message = "Аукцион без победителя"
+                self.auction_started = False
+                container['bought'] = True
+                self.message = "Оба пасовали! Контейнер ушел в сброс"
                 self.check_round()
+            elif len(auction['passed']) == 1:
+                # Один пасовал - второй автоматически получает контейнер
+                for p in ['p1', 'p2']:
+                    if p not in auction['passed']:
+                        winner = p
+                        break
+                if winner:
+                    if self.buy(winner, container['id']):
+                        self.auction = None
+                        self.auction_started = False
+                        self.message = f"{self.players[winner]['name']} получает контейнер (соперник пасовал)"
+                        self.check_round()
             return True
             
         elif action == 'buy':
@@ -258,6 +275,7 @@ class Game:
             
             if self.buy(pid, container['id']):
                 self.auction = None
+                self.auction_started = False
                 self.message = f"{player['name']} купил контейнер!"
                 self.check_round()
                 return True
@@ -282,7 +300,7 @@ class Game:
             self.waiting = True
             self.timer_running = False
             if not self.game_over:
-                self.message = "Время вышло!"
+                self.message = "Время раунда вышло!"
             return True
         
         return False
@@ -324,9 +342,15 @@ class Game:
         self.round_start = time.time()
         self.timer_running = True
         self.auction = None
+        self.auction_started = False
         self.round_done = False
         self.waiting = False
-        self.message = f"Раунд {self.round}"
+        self.message = f"Раунд {self.round} начался!"
+        
+        # Если только 1 контейнер - автоматически запускаем аукцион
+        available = self.get_available()
+        if len(available) == 1:
+            self.start_auction(available[0]['id'])
 
 # ---------------------------
 # 3. ТАЙМЕР
@@ -346,10 +370,11 @@ def start_timer(gid):
                 time.sleep(1)
                 continue
             
-            # Обновляем состояние каждую секунду
+            # Проверяем раунд
             if not game.round_done:
                 game.check_round()
             
+            # Проверяем аукцион
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -362,9 +387,9 @@ def start_timer(gid):
                             container['bought'] = True
                             game.message = "Время аукциона вышло!"
                     game.auction = None
+                    game.auction_started = False
                     game.check_round()
             
-            # Отправляем состояние
             send_state(gid)
             time.sleep(1)
     
@@ -461,7 +486,7 @@ def buy(data):
         return
     
     if game.auction:
-        emit('error', {'msg': 'Идет аукцион!'})
+        emit('error', {'msg': 'Идет аукцион! Используйте кнопки аукциона'})
         return
     
     container = next((c for c in game.containers if c['id'] == cid and not c['bought']), None)
@@ -547,6 +572,7 @@ def auction(data):
     cid = game.auction['id']
     game.auction_bid(pid, action)
     
+    # Если аукцион завершился с покупкой
     if not game.auction:
         container = next((c for c in game.containers if c['id'] == cid), None)
         if container and container['bought']:
@@ -583,8 +609,11 @@ def reset(data):
     if gid in timers:
         del timers[gid]
     
+    # Полностью сбрасываем игру
     games[gid] = Game()
     game = games[gid]
+    
+    # Восстанавливаем подключения
     for pid in ['p1', 'p2']:
         if game.players[pid]['sid']:
             game.connected[pid] = True
@@ -646,6 +675,9 @@ def send_state(gid):
         }
         remaining = max(0, AUCTION_TIMEOUT - (time.time() - game.auction_start))
         state['auction_time'] = remaining
+        state['auction_active'] = True
+    else:
+        state['auction_active'] = False
     
     if game.started and not game.game_over and not game.round_done:
         remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start))
