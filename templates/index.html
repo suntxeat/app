@@ -222,18 +222,6 @@
             overflow: hidden;
         }
         
-        .box::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: -2px;
-            right: -2px;
-            bottom: -2px;
-            background: linear-gradient(135deg, #1e2d45, #0a0e17);
-            border-radius: 18px;
-            z-index: -1;
-        }
-        
         .box:hover {
             transform: translateY(-4px);
             border-color: #58a6ff;
@@ -641,7 +629,7 @@ function update(s) {
     updateContainers(s.containers);
 
     // Auction
-    if (s.auction) {
+    if (s.auction_active && s.auction) {
         document.getElementById('auctionArea').style.display = 'block';
         const a = s.auction_data;
         const time = s.auction_time ? Math.ceil(s.auction_time) : 0;
@@ -650,6 +638,7 @@ function update(s) {
             <div>🔄 Повышений: ${a.raises} / ${a.max}</div>
             <div>👤 ${a.leader ? 'Лидер: ' + s.players[a.leader].name : '⏳ Ожидание ставок'}</div>
             <div style="color:#64748b;font-size:0.8em;margin-top:4px;">⏱️ ${time}с</div>
+            <div style="color:#64748b;font-size:0.8em;margin-top:4px;">🙅 Пасовали: ${a.passed.map(p => s.players[p].name).join(', ') || 'никто'}</div>
         `;
     } else {
         document.getElementById('auctionArea').style.display = 'none';
@@ -810,6 +799,7 @@ function resetGame() {
         document.getElementById('interceptBtn').disabled = false;
         document.getElementById('nextBtn').style.display = 'none';
         msg('info', '🔄 Новая игра');
+        // Перезагружаем страницу для полного сброса
         setTimeout(() => location.reload(), 500);
     }
 }
