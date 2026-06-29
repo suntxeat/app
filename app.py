@@ -14,19 +14,44 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 # ---------------------------
 
 ITEMS = {
-    "Алмаз": 500, "Золотой слиток": 400, "Платина": 350,
-    "Серебро": 200, "Бронза": 120, "Яхта": 200,
-    "Дом": 100, "Квартира": 85, "Машина": 70,
-    "Мотоцикл": 55, "Мебель": 40, "Телевизор": 35,
-    "Ноутбук": 30, "Телефон": 25, "Планшет": 20,
-    "Велосипед": -20, "Самокат": -15, "Ролики": -10,
-    "Лыжи": -5, "Коньки": -8, "Билет в кино": 15,
-    "Билет в театр": 25, "Билет на концерт": 35,
-    "Ресторан": 45, "Spa-салон": 55, "Путешествие": 80,
-    "Круиз": 120, "Отель": 65, "Вино": 20,
-    "Шампанское": 30, "Коньяк": 40, "Шоколад": 10,
-    "Торт": 15, "Цветы": 12, "Духи": 45,
-    "Часы": 60, "Кольцо": 90, "Ожерелье": 110
+    "Алмаз": 500,
+    "Золотой слиток": 400,
+    "Платина": 350,
+    "Серебро": 200,
+    "Бронза": 120,
+    "Яхта": 200,
+    "Дом": 100,
+    "Квартира": 85,
+    "Машина": 70,
+    "Мотоцикл": 55,
+    "Мебель": 40,
+    "Телевизор": 35,
+    "Ноутбук": 30,
+    "Телефон": 25,
+    "Планшет": 20,
+    "Велосипед": -20,
+    "Самокат": -15,
+    "Ролики": -10,
+    "Лыжи": -5,
+    "Коньки": -8,
+    "Билет в кино": 15,
+    "Билет в театр": 25,
+    "Билет на концерт": 35,
+    "Ресторан": 45,
+    "Spa-салон": 55,
+    "Путешествие": 80,
+    "Круиз": 120,
+    "Отель": 65,
+    "Вино": 20,
+    "Шампанское": 30,
+    "Коньяк": 40,
+    "Шоколад": 10,
+    "Торт": 15,
+    "Цветы": 12,
+    "Духи": 45,
+    "Часы": 60,
+    "Кольцо": 90,
+    "Ожерелье": 110
 }
 
 VALUES = ITEMS
@@ -36,7 +61,7 @@ MIN_CONTAINERS = 2
 AUCTION_STEP = 10
 AUCTION_MAX_RAISES = 3
 ROUND_TIMEOUT = 30
-AUCTION_TIMEOUT = 40
+AUCTION_TIMEOUT = 30
 
 # ---------------------------
 # 2. ХРАНИЛИЩЕ ИГР
@@ -76,6 +101,7 @@ class Game:
         self.round_start = 0
         self.auction_start = 0
         self.timer_running = False
+        self.auction_skipped = False
         
     def create_containers(self):
         """Создает контейнеры для раунда (1-5 штук)"""
@@ -153,7 +179,6 @@ class Game:
             self.message = "Перехват уже использован"
             return False
         
-        # Находим последний купленный контейнер соперника
         last = None
         for c in reversed(self.containers):
             if c['bought'] and c['buyer'] == other:
@@ -164,7 +189,6 @@ class Game:
             self.message = "Нет контейнеров для перехвата"
             return False
         
-        # Перехват
         other_player['containers'].remove(last['item'])
         other_player['chips'] += last['price']
         player['containers'].append(last['item'])
@@ -175,7 +199,7 @@ class Game:
         return True
     
     def start_auction(self, cid):
-        """Запускает аукцион"""
+        """Запускает аукцион при 1 контейнере"""
         container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
         if not container:
             return False
@@ -189,6 +213,7 @@ class Game:
             'start': time.time()
         }
         self.auction_start = time.time()
+        self.auction_skipped = False
         self.message = f"Аукцион! Старт: {container['price']} фишек"
         return True
     
@@ -209,7 +234,6 @@ class Game:
             self.message = "Контейнер уже куплен"
             return False
         
-        # Проверка таймаута аукциона
         if time.time() - self.auction_start > AUCTION_TIMEOUT:
             self.auction = None
             if auction['leader']:
@@ -253,7 +277,6 @@ class Game:
                 self.message = "Оба пасовали! Контейнер ушел в сброс"
                 self.check_round()
             elif len(auction['passed']) == 1:
-                # Один пасовал - второй получает контейнер
                 winner = 'p1' if 'p1' not in auction['passed'] else 'p2'
                 if self.buy_container(winner, container['id']):
                     self.auction = None
@@ -272,6 +295,20 @@ class Game:
                 self.check_round()
                 return True
         
+        return False
+    
+    def skip_auction(self, pid):
+        if not self.auction:
+            return False
+        
+        container = next((c for c in self.containers if c['id'] == self.auction['id']), None)
+        if container:
+            container['bought'] = True
+            self.auction = None
+            self.auction_skipped = True
+            self.message = f"{self.players[pid]['name']} пропустил аукцион"
+            self.check_round()
+            return True
         return False
     
     def check_round(self):
@@ -299,7 +336,6 @@ class Game:
     
     def check_game(self):
         if self.round >= MAX_ROUNDS and self.waiting:
-            # Подсчет очков
             for p in self.players.values():
                 p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
             
@@ -337,9 +373,9 @@ class Game:
         self.auction = None
         self.round_done = False
         self.waiting = False
+        self.auction_skipped = False
         self.message = f"Раунд {self.round} начался!"
         
-        # Если только 1 контейнер - запускаем аукцион
         available = self.get_available()
         if len(available) == 1:
             self.start_auction(available[0]['id'])
@@ -359,11 +395,9 @@ def start_timer(gid):
                 time.sleep(1)
                 continue
             
-            # Проверяем раунд
             if not game.round_done:
                 game.check_round()
             
-            # Проверяем аукцион
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -523,7 +557,6 @@ def handle_intercept(data):
         emit('error', {'msg': 'Игра не активна'})
         return
     
-    # Сохраняем данные до перехвата
     other = 'p2' if pid == 'p1' else 'p1'
     last = None
     for c in reversed(game.containers):
@@ -560,7 +593,6 @@ def handle_auction(data):
     cid = game.auction['id']
     game.auction_bid(pid, action)
     
-    # Если аукцион завершился с покупкой
     if not game.auction:
         container = next((c for c in game.containers if c['id'] == cid), None)
         if container and container['bought']:
@@ -569,6 +601,26 @@ def handle_auction(data):
                 'value': container['value']
             }, room=game.players[container['buyer']]['sid'])
     
+    send_state(gid)
+
+@socketio.on('skip_auction')
+def handle_skip_auction(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
+        return
+    
+    game = games[gid]
+    pid = data.get('pid')
+    
+    if not game.started or game.game_over:
+        emit('error', {'msg': 'Игра не активна'})
+        return
+    
+    if not game.auction:
+        emit('error', {'msg': 'Аукцион не активен'})
+        return
+    
+    game.skip_auction(pid)
     send_state(gid)
 
 @socketio.on('next_round')
@@ -593,11 +645,9 @@ def handle_reset(data):
     if not gid or gid not in games:
         return
     
-    # Полностью сбрасываем игру
     games[gid] = Game()
     game = games[gid]
     
-    # Восстанавливаем подключения
     for pid in ['p1', 'p2']:
         if game.players[pid]['sid']:
             game.connected[pid] = True
@@ -642,12 +692,26 @@ def send_state(gid):
         else:
             state['players'][pid]['score'] = None
     
+    # Показываем ВСЕ контейнеры (и купленные и нет) для прозрачности
     for c in game.containers:
-        if not c['bought']:
-            state['containers'].append({
-                'id': c['id'],
-                'price': c['price']
-            })
+        container_data = {
+            'id': c['id'],
+            'price': c['price'],
+            'bought': c['bought'],
+            'buyer': c['buyer']
+        }
+        # Если контейнер куплен и игра окончена - показываем содержимое
+        if c['bought'] and game.game_over:
+            container_data['item'] = c['item']
+            container_data['value'] = c['value']
+        elif not c['bought']:
+            container_data['item'] = None
+            container_data['value'] = None
+        else:
+            # Куплен, но игра не окончена - содержимое скрыто
+            container_data['item'] = None
+            container_data['value'] = None
+        state['containers'].append(container_data)
     
     if game.auction:
         state['auction_data'] = {
