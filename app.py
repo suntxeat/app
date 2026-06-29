@@ -75,7 +75,6 @@ class Game:
         self.reset()
     
     def reset(self):
-        # Создаем пул предметов
         self.pool = []
         for item, val in ITEMS.items():
             count = 2 if random.random() > 0.6 else 1
@@ -102,9 +101,9 @@ class Game:
         self.auction_start = 0
         self.timer_running = False
         self.auction_skipped = False
+        self.auto_next = False
         
     def create_containers(self):
-        """Создает контейнеры для раунда (1-5 штук)"""
         if not self.pool:
             self.pool = []
             for item, val in ITEMS.items():
@@ -199,7 +198,6 @@ class Game:
         return True
     
     def start_auction(self, cid):
-        """Запускает аукцион при 1 контейнере"""
         container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
         if not container:
             return False
@@ -320,6 +318,7 @@ class Game:
             self.timer_running = False
             if not self.game_over:
                 self.message = "Все контейнеры куплены!"
+                self.auto_next = True
             return True
         
         if self.started and time.time() - self.round_start > ROUND_TIMEOUT:
@@ -330,6 +329,7 @@ class Game:
             self.timer_running = False
             if not self.game_over:
                 self.message = "Время раунда вышло!"
+                self.auto_next = True
             return True
         
         return False
@@ -374,6 +374,7 @@ class Game:
         self.round_done = False
         self.waiting = False
         self.auction_skipped = False
+        self.auto_next = False
         self.message = f"Раунд {self.round} начался!"
         
         available = self.get_available()
@@ -395,9 +396,11 @@ def start_timer(gid):
                 time.sleep(1)
                 continue
             
+            # Проверяем раунд
             if not game.round_done:
                 game.check_round()
             
+            # Проверяем аукцион
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -411,6 +414,11 @@ def start_timer(gid):
                             game.message = "Время аукциона вышло!"
                     game.auction = None
                     game.check_round()
+            
+            # Автоматический переход на следующий раунд
+            if game.waiting and game.auto_next and not game.game_over:
+                game.auto_next = False
+                game.next_round()
             
             send_state(gid)
             time.sleep(1)
@@ -636,6 +644,7 @@ def handle_next_round(data):
         return
     
     if game.waiting:
+        game.auto_next = False
         game.next_round()
         send_state(gid)
 
@@ -673,6 +682,7 @@ def send_state(gid):
         'started': game.started,
         'round_done': game.round_done,
         'waiting': game.waiting,
+        'auto_next': game.auto_next,
         'players': {},
         'containers': []
     }
@@ -692,7 +702,7 @@ def send_state(gid):
         else:
             state['players'][pid]['score'] = None
     
-    # Показываем ВСЕ контейнеры (и купленные и нет) для прозрачности
+    # Показываем ВСЕ контейнеры
     for c in game.containers:
         container_data = {
             'id': c['id'],
@@ -700,15 +710,13 @@ def send_state(gid):
             'bought': c['bought'],
             'buyer': c['buyer']
         }
-        # Если контейнер куплен и игра окончена - показываем содержимое
         if c['bought'] and game.game_over:
             container_data['item'] = c['item']
             container_data['value'] = c['value']
-        elif not c['bought']:
+        elif c['bought'] and not game.game_over:
             container_data['item'] = None
             container_data['value'] = None
         else:
-            # Куплен, но игра не окончена - содержимое скрыто
             container_data['item'] = None
             container_data['value'] = None
         state['containers'].append(container_data)
