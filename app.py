@@ -126,7 +126,8 @@ class Game:
                 'price': price,
                 'value': VALUES.get(item, 0),
                 'bought': False,
-                'buyer': None
+                'buyer': None,
+                'revealed_to': []  # Кто уже видел содержимое (рентген или покупка)
             })
         return containers
     
@@ -149,6 +150,9 @@ class Game:
         player['containers'].append(container['item'])
         container['bought'] = True
         container['buyer'] = pid
+        # Покупатель видит содержимое
+        if pid not in container['revealed_to']:
+            container['revealed_to'].append(pid)
         
         self.message = f"{player['name']} купил контейнер"
         return True
@@ -166,6 +170,9 @@ class Game:
             return None
         
         player['xray'] = True
+        # Тот, кто использовал рентген, видит содержимое
+        if pid not in container['revealed_to']:
+            container['revealed_to'].append(pid)
         self.message = f"{player['name']} использовал рентген"
         return container['item']
     
@@ -192,6 +199,9 @@ class Game:
         other_player['chips'] += last['price']
         player['containers'].append(last['item'])
         last['buyer'] = pid
+        # Перехватчик видит содержимое
+        if pid not in last['revealed_to']:
+            last['revealed_to'].append(pid)
         player['intercept'] = True
         
         self.message = f"{player['name']} перехватил контейнер"
@@ -396,11 +406,9 @@ def start_timer(gid):
                 time.sleep(1)
                 continue
             
-            # Проверяем раунд
             if not game.round_done:
                 game.check_round()
             
-            # Проверяем аукцион
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -415,7 +423,6 @@ def start_timer(gid):
                     game.auction = None
                     game.check_round()
             
-            # Автоматический переход на следующий раунд
             if game.waiting and game.auto_next and not game.game_over:
                 game.auto_next = False
                 game.next_round()
@@ -521,9 +528,11 @@ def handle_buy(data):
     container = next((c for c in game.containers if c['id'] == cid and not c['bought']), None)
     if container:
         if game.buy_container(pid, cid):
+            # Отправляем содержимое только покупателю
             emit('bought', {
                 'item': container['item'],
-                'value': container['value']
+                'value': container['value'],
+                'cid': cid
             }, room=request.sid)
     
     game.check_round()
@@ -547,7 +556,8 @@ def handle_xray(data):
     if result:
         emit('xray_result', {
             'item': result,
-            'value': VALUES.get(result, 0)
+            'value': VALUES.get(result, 0),
+            'cid': cid
         }, room=request.sid)
     
     send_state(gid)
@@ -575,7 +585,8 @@ def handle_intercept(data):
     if last and game.use_intercept(pid):
         emit('intercept_result', {
             'item': last['item'],
-            'value': last['value']
+            'value': last['value'],
+            'cid': last['id']
         }, room=request.sid)
     
     send_state(gid)
@@ -606,7 +617,8 @@ def handle_auction(data):
         if container and container['bought']:
             emit('bought', {
                 'item': container['item'],
-                'value': container['value']
+                'value': container['value'],
+                'cid': cid
             }, room=game.players[container['buyer']]['sid'])
     
     send_state(gid)
@@ -630,23 +642,6 @@ def handle_skip_auction(data):
     
     game.skip_auction(pid)
     send_state(gid)
-
-@socketio.on('next_round')
-def handle_next_round(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    
-    if game.game_over:
-        emit('error', {'msg': 'Игра закончена'})
-        return
-    
-    if game.waiting:
-        game.auto_next = False
-        game.next_round()
-        send_state(gid)
 
 @socketio.on('reset')
 def handle_reset(data):
@@ -702,20 +697,18 @@ def send_state(gid):
         else:
             state['players'][pid]['score'] = None
     
-    # Показываем ВСЕ контейнеры
+    # Отправляем контейнеры с пометкой, кто видел содержимое
     for c in game.containers:
         container_data = {
             'id': c['id'],
             'price': c['price'],
             'bought': c['bought'],
-            'buyer': c['buyer']
+            'buyer': c['buyer'],
+            'revealed_to': c['revealed_to']
         }
         if c['bought'] and game.game_over:
             container_data['item'] = c['item']
             container_data['value'] = c['value']
-        elif c['bought'] and not game.game_over:
-            container_data['item'] = None
-            container_data['value'] = None
         else:
             container_data['item'] = None
             container_data['value'] = None
