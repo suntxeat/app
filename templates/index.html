@@ -130,7 +130,6 @@
         }
         .abilities .used { color:#34d399; }
         .abilities .avail { color:#fbbf24; }
-        .abilities .disabled { color:#475569; }
         .section {
             font-size:0.8em;
             font-weight:600;
@@ -220,16 +219,16 @@
         .auction .btns .btn { flex:1; min-width:60px; padding:4px 12px; font-size:0.75em; }
         .bar {
             width:100%;
-            height:3px;
+            height:4px;
             background:#1e2d45;
-            border-radius:3px;
+            border-radius:4px;
             overflow:hidden;
-            margin:6px 0;
+            margin:8px 0;
         }
         .fill {
             height:100%;
             background:linear-gradient(90deg,#22c55e,#f59e0b,#ef4444);
-            transition:width 1s linear;
+            transition:width 0.3s linear;
         }
         .over {
             background:linear-gradient(145deg,#1a2440,#0f1a2e);
@@ -462,13 +461,20 @@ function updateMy() {
 
 function update(s) {
     state = s;
+    console.log('📦 State update:', s);
+    
     document.getElementById('roundInfo').textContent = '📊 Раунд: ' + s.round + ' / ' + s.max;
-    if (s.msg) msg('info', s.msg);
+    if (s.msg) {
+        const box = document.getElementById('msgBox');
+        box.textContent = s.msg;
+        box.className = 'msg';
+    }
 
     updatePlayer('p1', s.players.p1);
     updatePlayer('p2', s.players.p2);
     updateContainers(s.containers);
 
+    // Аукцион
     if (s.auction) {
         document.getElementById('auctionArea').style.display = 'block';
         const a = s.auction_data;
@@ -483,19 +489,27 @@ function update(s) {
         document.getElementById('auctionArea').style.display = 'none';
     }
 
-    if (s.time !== undefined && s.time !== null && !s.round_done) {
+    // ТАЙМЕР - главное исправление здесь
+    if (s.time !== undefined && s.time !== null && s.time > 0) {
         const pct = Math.max(0, Math.min(100, (s.time / 30) * 100));
         document.getElementById('timerFill').style.width = pct + '%';
         document.getElementById('timerDisplay').textContent = '⏱️ ' + Math.ceil(s.time) + 'с';
-    } else if (s.round_done) {
-        document.getElementById('timerDisplay').textContent = '⏱️ ✅';
+        console.log('⏱️ Таймер обновлен:', Math.ceil(s.time) + 'с');
+    } else if (s.time !== undefined && s.time !== null && s.time === 0) {
+        document.getElementById('timerFill').style.width = '0%';
+        document.getElementById('timerDisplay').textContent = '⏱️ 0с';
+    } else if (s.round_active === false && s.round > 0 && !s.over) {
+        document.getElementById('timerDisplay').textContent = '⏱️ ⏳';
         document.getElementById('timerFill').style.width = '100%';
     } else if (s.over) {
         document.getElementById('timerDisplay').textContent = '⏱️ 🏁';
+        document.getElementById('timerFill').style.width = '100%';
     } else {
         document.getElementById('timerDisplay').textContent = '⏱️ --';
+        document.getElementById('timerFill').style.width = '100%';
     }
 
+    // Конец игры
     if (s.over) {
         document.getElementById('overScreen').style.display = 'block';
         document.getElementById('overMsg').textContent = s.msg;
@@ -644,8 +658,8 @@ function updateContainers(containers) {
                 `;
             }
         } else {
-            const canBuy = you && !isGameOver && state.started && !state.round_done;
-            const canXray = you && !isGameOver && state.started && !you.xray && !state.round_done;
+            const canBuy = you && !isGameOver && state.started && state.round_active;
+            const canXray = you && !isGameOver && state.started && !you.xray && state.round_active;
             
             if (isRevealed) {
                 div.innerHTML = `
