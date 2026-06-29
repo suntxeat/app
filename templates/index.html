@@ -264,16 +264,6 @@
         .join .btns { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
         .join .btns .btn { padding:8px 28px; font-size:0.95em; min-width:90px; }
         .empty { color:#475569; text-align:center; padding:12px; font-style:italic; font-size:0.8em; }
-        .reconnect-msg {
-            background:rgba(245,158,11,0.15);
-            border:1px solid #f59e0b;
-            border-radius:8px;
-            padding:8px 14px;
-            margin-bottom:12px;
-            color:#fbbf24;
-            font-size:0.85em;
-            text-align:center;
-        }
         @media(max-width:768px){
             .container{padding:12px;}
             .players{grid-template-columns:1fr;}
@@ -307,8 +297,6 @@
         </div>
 
         <div id="gameScreen" style="display:none;">
-            <div id="reconnectMsg" class="reconnect-msg" style="display:none;">🔄 Восстановление соединения...</div>
-            
             <div class="status">
                 <span class="round" id="roundInfo">📊 Раунд: 0 / 3</span>
                 <span class="player" id="playerInfo">👤 Вы: --</span>
@@ -384,51 +372,22 @@
 </div>
 
 <script>
-let socket = null, pid = null, gid = 'default', state = null, myItems = [];
-let revealed = {};
-let reconnectAttempts = 0;
-let timerInterval = null;
+let socket = null, pid = null, gid = 'default', state = null;
+let myItems = [], revealed = {};
 
 function join(p) {
     pid = p;
     document.getElementById('joinScreen').style.display = 'none';
     document.getElementById('gameScreen').style.display = 'block';
-
     connectSocket();
 }
 
 function connectSocket() {
-    if (socket) {
-        socket.disconnect();
-    }
-    
     socket = io();
 
     socket.on('connect', function() {
-        document.getElementById('reconnectMsg').style.display = 'none';
-        console.log('Connected to server');
-        socket.emit('join', { gid: gid, pid: pid, restore: true });
-    });
-
-    socket.on('reconnect', function() {
-        document.getElementById('reconnectMsg').style.display = 'none';
-        console.log('Reconnected');
-        socket.emit('join', { gid: gid, pid: pid, restore: true });
-    });
-
-    socket.on('reconnect_attempt', function() {
-        document.getElementById('reconnectMsg').style.display = 'block';
-        document.getElementById('reconnectMsg').textContent = '🔄 Попытка переподключения...';
-    });
-
-    socket.on('connect_error', function() {
-        document.getElementById('reconnectMsg').style.display = 'block';
-        document.getElementById('reconnectMsg').textContent = '⚠️ Ошибка соединения, переподключение...';
-    });
-
-    socket.on('force_disconnect', function() {
-        alert('Ваше соединение было заменено новым подключением');
-        location.reload();
+        console.log('Connected');
+        socket.emit('join', { gid: gid, pid: pid });
     });
 
     socket.on('assigned', function(data) {
@@ -468,16 +427,8 @@ function connectSocket() {
         if (state) updateContainers(state.containers);
     });
 
-    socket.on('player_disconnected', function(data) {
-        msg('warn', '⚠️ ' + data.pid + ' отключился');
-    });
-
     socket.on('error', function(data) { msg('err', '❌ ' + data.msg); });
-    socket.on('disconnect', function() { 
-        msg('err', '❌ Соединение потеряно, переподключение...');
-        document.getElementById('reconnectMsg').style.display = 'block';
-        document.getElementById('reconnectMsg').textContent = '🔄 Переподключение...';
-    });
+    socket.on('disconnect', function() { msg('err', '❌ Соединение потеряно'); });
 }
 
 function msg(type, text) {
@@ -525,13 +476,12 @@ function update(s) {
             <div>💰 Ставка: <strong>${a.price}</strong> фишек</div>
             <div>🔄 Повышений: ${a.raises} / ${a.max}</div>
             <div>👤 ${a.leader ? 'Лидер: ' + s.players[a.leader].name : '⏳ Ожидание'}</div>
-            <div style="color:#64748b;font-size:0.75em;margin-top:4px;">⏱️ ${time}с | Пас: ${a.passed.map(p => s.players[p].name).join(', ') || 'никто'}</div>
+            <div style="color:#64748b;font-size:0.75em;margin-top:4px;">⏱️ ${time}с</div>
         `;
     } else {
         document.getElementById('auctionArea').style.display = 'none';
     }
 
-    // ТАЙМЕР - ОБНОВЛЯЕТСЯ В РЕАЛЬНОМ ВРЕМЕНИ
     if (s.time !== undefined && s.time !== null && !s.round_done) {
         const pct = (s.time / 30) * 100;
         document.getElementById('timerFill').style.width = pct + '%';
@@ -647,7 +597,6 @@ function updateContainers(containers) {
     containers.forEach(c => {
         const div = document.createElement('div');
         div.className = 'box';
-
         const isRevealed = revealed[c.id] !== undefined;
         const revealData = revealed[c.id];
 
@@ -676,7 +625,6 @@ function updateContainers(containers) {
                     <div class="bought-label">✅ Куплен</div>
                     <div class="hidden-label">❓ содержимое скрыто</div>
                     <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
-                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             }
         } else {
@@ -704,23 +652,22 @@ function updateContainers(containers) {
                 `;
             }
         }
-
         grid.appendChild(div);
     });
 }
 
-function startGame() { socket.emit('start', {}); document.getElementById('startBtn').disabled = true; }
-function buy(cid) { socket.emit('buy', { pid: pid, cid: cid }); }
-function xray(cid) { socket.emit('xray', { pid: pid, cid: cid }); }
-function intercept() { socket.emit('intercept', { pid: pid }); }
-function auction(action) { socket.emit('auction', { pid: pid, action: action }); }
-function skipAuction() { socket.emit('skip_auction', { pid: pid }); }
+function startGame() { socket.emit('start', { gid: gid }); document.getElementById('startBtn').disabled = true; }
+function buy(cid) { socket.emit('buy', { gid: gid, pid: pid, cid: cid }); }
+function xray(cid) { socket.emit('xray', { gid: gid, pid: pid, cid: cid }); }
+function intercept() { socket.emit('intercept', { gid: gid, pid: pid }); }
+function auction(action) { socket.emit('auction', { gid: gid, pid: pid, action: action }); }
+function skipAuction() { socket.emit('skip_auction', { gid: gid, pid: pid }); }
 
 function resetGame() {
     if (confirm('🔄 Начать новую игру?')) {
         myItems = [];
         revealed = {};
-        socket.emit('reset', {});
+        socket.emit('reset', { gid: gid });
         document.getElementById('overScreen').style.display = 'none';
         document.getElementById('startBtn').disabled = true;
         document.getElementById('interceptBtn').disabled = false;
