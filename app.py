@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room
 import random
 import time
 import os
@@ -75,6 +75,7 @@ class Game:
         self.auction_start = 0
         self.auto_next = False
         self.timer_thread = None
+        self.round_timer_triggered = False
         
     def create_containers(self):
         if not self.pool:
@@ -288,28 +289,39 @@ class Game:
         return False
     
     def check_round(self):
+        if not self.started:
+            return False
+            
         available = self.get_available()
         
+        # Проверяем все ли контейнеры куплены
         if not available:
-            self.round_done = True
-            self.waiting = True
-            self.message = "Все контейнеры куплены!"
-            self.auto_next = True
+            if not self.round_done:
+                self.round_done = True
+                self.waiting = True
+                self.message = "Все контейнеры куплены!"
+                self.auto_next = True
+                print(f"✅ Раунд {self.round} завершен - все контейнеры куплены")
             return True
         
-        if self.started and time.time() - self.round_start > ROUND_TIMEOUT:
-            for c in available:
-                c['bought'] = True
-            self.round_done = True
-            self.waiting = True
-            self.message = "Время раунда вышло!"
-            self.auto_next = True
+        # Проверяем таймаут раунда
+        elapsed = time.time() - self.round_start
+        if elapsed > ROUND_TIMEOUT:
+            if not self.round_done:
+                # Все некупленные контейнеры уходят в сброс
+                for c in available:
+                    c['bought'] = True
+                self.round_done = True
+                self.waiting = True
+                self.message = "Время раунда вышло!"
+                self.auto_next = True
+                print(f"⏰ Раунд {self.round} завершен по таймауту ({elapsed:.1f}с)")
             return True
         
         return False
     
     def check_game(self):
-        if self.round >= MAX_ROUNDS and self.waiting:
+        if self.round >= MAX_ROUNDS and self.waiting and not self.game_over:
             for p in self.players.values():
                 p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
             
@@ -332,11 +344,13 @@ class Game:
                     self.winner = 'draw'
             
             self.game_over = True
+            print(f"🏆 Игра окончена! Победитель: {self.winner}")
             return True
         return False
     
     def next_round(self):
         if self.round >= MAX_ROUNDS:
+            print(f"⚠️ Попытка начать раунд {self.round + 1}, но максимум {MAX_ROUNDS}")
             return
         
         self.round += 1
@@ -346,17 +360,23 @@ class Game:
         self.round_done = False
         self.waiting = False
         self.auto_next = False
+        self.round_timer_triggered = False
         self.message = f"Раунд {self.round} начался!"
+        
+        print(f"🔄 Начало раунда {self.round}, контейнеров: {len(self.containers)}")
         
         available = self.get_available()
         if len(available) == 1:
             self.start_auction(available[0]['id'])
+            print(f"🔨 Аукцион запущен для контейнера {available[0]['id']}")
 
 # ---------------------------
 # 3. ТАЙМЕР
 # ---------------------------
 
 def start_timer(gid):
+    print(f"⏰ Запущен таймер для игры {gid}")
+    
     def timer_loop():
         while gid in games:
             game = games.get(gid)
@@ -367,11 +387,15 @@ def start_timer(gid):
                 time.sleep(0.5)
                 continue
             
+            # Проверяем время раунда
             if not game.round_done and game.started:
                 game.check_round()
             
+            # Проверяем время аукциона
             if game.auction:
-                if time.time() - game.auction_start > AUCTION_TIMEOUT:
+                elapsed = time.time() - game.auction_start
+                if elapsed > AUCTION_TIMEOUT:
+                    print(f"⏰ Аукцион завершен по таймауту")
                     cid = game.auction['id']
                     container = next((c for c in game.containers if c['id'] == cid), None)
                     if container and not container['bought']:
@@ -384,9 +408,21 @@ def start_timer(gid):
                     game.auction = None
                     game.check_round()
             
+            # Автоматический переход на следующий раунд
             if game.waiting and game.auto_next and not game.game_over:
                 game.auto_next = False
-                game.next_round()
+                game.waiting = False
+                print(f"🔄 Автоматический переход на следующий раунд")
+                
+                # Проверяем, не закончилась ли игра
+                if game.round >= MAX_ROUNDS:
+                    game.check_game()
+                else:
+                    game.next_round()
+            
+            # Проверяем завершение игры после 3 раундов
+            if game.round >= MAX_ROUNDS and game.waiting:
+                game.check_game()
             
             send_state(gid)
             time.sleep(0.3)
@@ -410,7 +446,6 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
-    # Очищаем подключение игрока
     for gid, game in games.items():
         for pid in ['p1', 'p2']:
             if game.players[pid]['sid'] == request.sid:
@@ -435,11 +470,9 @@ def handle_join(data):
         emit('error', {'msg': 'Неверный ID игрока'})
         return
     
-    # Если игрок уже подключен с другим сокетом - отключаем старого
     if game.connected[pid]:
         old_sid = game.players[pid]['sid']
         if old_sid and old_sid != request.sid:
-            # Отключаем старого игрока
             game.connected[pid] = False
             game.players[pid]['sid'] = None
             print(f"Old player {pid} disconnected, new connection from {request.sid}")
@@ -636,7 +669,7 @@ def send_state(gid):
     
     game = games[gid]
     
-    if game.round >= MAX_ROUNDS and game.waiting:
+    if game.round >= MAX_ROUNDS and game.waiting and not game.game_over:
         game.check_game()
     
     state = {
