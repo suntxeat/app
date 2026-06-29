@@ -164,6 +164,12 @@
             color:#475569;
             margin-top:4px;
         }
+        .box .xray-result {
+            font-size:0.85em;
+            color:#58a6ff;
+            margin-top:4px;
+            font-weight:600;
+        }
         .btn {
             padding:4px 10px;
             border:none;
@@ -349,7 +355,6 @@
 
             <div class="actions">
                 <button class="btn btn-green" onclick="startGame()" id="startBtn">🚀 Начать игру</button>
-                <button class="btn btn-cyan" onclick="nextRound()" id="nextBtn" style="display:none;">➡ Следующий раунд</button>
                 <button class="btn btn-purple" onclick="intercept()" id="interceptBtn">🦅 Перехват</button>
                 <button class="btn btn-pink" onclick="resetGame()" id="resetBtn">🔄 Новая игра</button>
             </div>
@@ -370,6 +375,7 @@
 
 <script>
 let socket = null, pid = null, gid = 'default', state = null, myItems = [];
+let xrayResults = {};
 
 function join(p) {
     pid = p;
@@ -398,7 +404,9 @@ function join(p) {
     socket.on('state', function(s) { update(s); });
 
     socket.on('xray_result', function(data) {
-        msg('ok', '🔍 Рентген: ' + data.item + ' (' + data.value + ' очков)');
+        msg('ok', '🔍 Рентген: в контейнере ' + data.item + ' (' + data.value + ' очков)');
+        xrayResults[data.cid] = { item: data.item, value: data.value };
+        updateContainers(state ? state.containers : []);
     });
 
     socket.on('bought', function(data) {
@@ -408,7 +416,7 @@ function join(p) {
     });
 
     socket.on('intercept_result', function(data) {
-        msg('ok', '🦅 Перехват: ' + data.item + ' (' + data.value + ' очков)');
+        msg('ok', '🦅 Перехват: вы забрали ' + data.item + ' (' + data.value + ' очков)');
         myItems.push(data.item);
         updateMy();
     });
@@ -505,15 +513,8 @@ function update(s) {
         `;
         document.getElementById('startBtn').disabled = true;
         document.getElementById('interceptBtn').disabled = true;
-        document.getElementById('nextBtn').style.display = 'none';
     } else {
         document.getElementById('overScreen').style.display = 'none';
-    }
-
-    if (s.waiting && !s.over) {
-        document.getElementById('nextBtn').style.display = 'block';
-    } else {
-        document.getElementById('nextBtn').style.display = 'none';
     }
 
     const you = s.players[pid];
@@ -594,9 +595,7 @@ function updateContainers(containers) {
         div.className = 'box';
 
         if (c.bought) {
-            // Контейнер куплен
             if (state && state.over) {
-                // Игра окончена - показываем содержимое
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">Куплен</div>
@@ -606,21 +605,29 @@ function updateContainers(containers) {
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             } else {
-                // Игра не окончена - содержимое скрыто
+                let xrayHtml = '';
+                if (xrayResults[c.id]) {
+                    xrayHtml = `<div class="xray-result">🔍 ${xrayResults[c.id].item} (+${xrayResults[c.id].value})</div>`;
+                }
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
                     <div class="hidden">❓ содержимое скрыто</div>
+                    ${xrayHtml}
                     <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
                 `;
             }
         } else {
-            // Контейнер доступен для покупки
+            let xrayHtml = '';
+            if (xrayResults[c.id]) {
+                xrayHtml = `<div class="xray-result">🔍 ${xrayResults[c.id].item} (+${xrayResults[c.id].value})</div>`;
+            }
             div.innerHTML = `
                 <span class="icon">📦</span>
                 <div class="price">${c.price}</div>
                 <div class="lbl">фишек</div>
                 <div class="hidden">❓ содержимое скрыто</div>
+                ${xrayHtml}
                 <div class="btns">
                     <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
                     <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
@@ -638,16 +645,15 @@ function xray(cid) { socket.emit('xray', { pid: pid, cid: cid }); }
 function intercept() { socket.emit('intercept', { pid: pid }); }
 function auction(action) { socket.emit('auction', { pid: pid, action: action }); }
 function skipAuction() { socket.emit('skip_auction', { pid: pid }); }
-function nextRound() { socket.emit('next_round', {}); }
 
 function resetGame() {
     if (confirm('🔄 Начать новую игру?')) {
         myItems = [];
+        xrayResults = {};
         socket.emit('reset', {});
         document.getElementById('overScreen').style.display = 'none';
         document.getElementById('startBtn').disabled = true;
         document.getElementById('interceptBtn').disabled = false;
-        document.getElementById('nextBtn').style.display = 'none';
         msg('info', '🔄 Новая игра');
         setTimeout(() => location.reload(), 500);
     }
