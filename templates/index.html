@@ -159,6 +159,11 @@
         .box .hidden { font-size:0.75em; color:#475569; margin-top:4px; font-style:italic; }
         .box .btns { display:flex; gap:4px; margin-top:8px; }
         .box .btns .btn { flex:1; }
+        .box .bought-label {
+            font-size:0.75em;
+            color:#475569;
+            margin-top:4px;
+        }
         .btn {
             padding:4px 10px;
             border:none;
@@ -337,6 +342,7 @@
                         <button class="btn btn-yellow" onclick="auction('raise')">⬆ Повысить (+10)</button>
                         <button class="btn btn-red" onclick="auction('pass')">🙅 Пас</button>
                         <button class="btn btn-green" onclick="auction('buy')">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="skipAuction()">⏭ Пропустить</button>
                     </div>
                 </div>
             </div>
@@ -578,23 +584,50 @@ function updateContainers(containers) {
     if (!containers || containers.length === 0) {
         const div = document.createElement('div');
         div.className = 'empty';
-        div.textContent = '📭 Нет доступных контейнеров';
+        div.textContent = '📭 Нет контейнеров';
         grid.appendChild(div);
         return;
     }
+
     containers.forEach(c => {
         const div = document.createElement('div');
         div.className = 'box';
-        div.innerHTML = `
-            <span class="icon">📦</span>
-            <div class="price">${c.price}</div>
-            <div class="lbl">фишек</div>
-            <div class="hidden">❓ содержимое скрыто</div>
-            <div class="btns">
-                <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
-                <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
-            </div>
-        `;
+
+        if (c.bought) {
+            // Контейнер куплен
+            if (state && state.over) {
+                // Игра окончена - показываем содержимое
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div style="font-size:0.8em;color:#64748b;">Куплен</div>
+                    <div style="font-size:0.9em;color:#58a6ff;margin-top:4px;">${c.item}</div>
+                    <div style="font-size:0.8em;color:#f59e0b;">+${c.value} очков</div>
+                    <div style="font-size:0.7em;color:#64748b;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
+                `;
+            } else {
+                // Игра не окончена - содержимое скрыто
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
+                    <div class="hidden">❓ содержимое скрыто</div>
+                    <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
+                `;
+            }
+        } else {
+            // Контейнер доступен для покупки
+            div.innerHTML = `
+                <span class="icon">📦</span>
+                <div class="price">${c.price}</div>
+                <div class="lbl">фишек</div>
+                <div class="hidden">❓ содержимое скрыто</div>
+                <div class="btns">
+                    <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
+                    <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                </div>
+            `;
+        }
+
         grid.appendChild(div);
     });
 }
@@ -604,6 +637,7 @@ function buy(cid) { socket.emit('buy', { pid: pid, cid: cid }); }
 function xray(cid) { socket.emit('xray', { pid: pid, cid: cid }); }
 function intercept() { socket.emit('intercept', { pid: pid }); }
 function auction(action) { socket.emit('auction', { pid: pid, action: action }); }
+function skipAuction() { socket.emit('skip_auction', { pid: pid }); }
 function nextRound() { socket.emit('next_round', {}); }
 
 function resetGame() {
