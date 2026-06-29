@@ -618,7 +618,6 @@ function updateContainers(containers) {
 
         if (c.bought) {
             if (isGameOver) {
-                // В конце игры показываем всё
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">Куплен</div>
@@ -628,7 +627,6 @@ function updateContainers(containers) {
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             } else if (isRevealed && c.buyer === pid) {
-                // Свой купленный контейнер - видим содержимое
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
@@ -638,7 +636,6 @@ function updateContainers(containers) {
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             } else {
-                // Чужой купленный контейнер - скрыт
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div class="bought-label">✅ Куплен</div>
@@ -647,7 +644,6 @@ function updateContainers(containers) {
                 `;
             }
         } else {
-            // Не куплен
             const canBuy = you && !isGameOver && state.started && !state.round_done;
             const canXray = you && !isGameOver && state.started && !you.xray && !state.round_done;
             
