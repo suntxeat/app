@@ -44,13 +44,13 @@ AUCTION_TIMEOUT = 30
 
 games = {}
 game_players = {}
+game_sids = {}  # {sid: game_id}
 
 class Game:
     def __init__(self):
         self.reset()
     
     def reset(self):
-        # Создаем пул предметов
         self.pool = []
         for item, val in ITEMS.items():
             count = 2 if random.random() > 0.6 else 1
@@ -77,9 +77,9 @@ class Game:
         self.auction_start = 0
         self.timer_running = False
         self.auto_next = False
+        self.last_state = None
         
     def create_containers(self):
-        """Создает контейнеры для раунда (1-5 штук)"""
         if not self.pool:
             self.pool = []
             for item, val in ITEMS.items():
@@ -297,9 +297,8 @@ class Game:
             self.round_done = True
             self.waiting_for_next = True
             self.timer_running = False
-            if not self.game_over:
-                self.message = "Все контейнеры куплены!"
-                self.auto_next = True
+            self.message = "Все контейнеры куплены!"
+            self.auto_next = True
             return True
         
         if self.started and time.time() - self.round_start > ROUND_TIMEOUT:
@@ -308,9 +307,8 @@ class Game:
             self.round_done = True
             self.waiting_for_next = True
             self.timer_running = False
-            if not self.game_over:
-                self.message = "Время раунда вышло!"
-                self.auto_next = True
+            self.message = "Время раунда вышло!"
+            self.auto_next = True
             return True
         
         return False
@@ -357,7 +355,6 @@ class Game:
         self.auto_next = False
         self.message = f"Раунд {self.round} начался!"
         
-        # Если только 1 контейнер - запускаем аукцион
         available = self.get_available()
         if len(available) == 1:
             self.start_auction(available[0]['id'])
@@ -396,7 +393,7 @@ def start_timer(gid):
                     game.auction = None
                     game.check_round()
             
-            # Автоматический переход на следующий раунд
+            # Автоматический переход
             if game.waiting_for_next and game.auto_next and not game.game_over:
                 game.auto_next = False
                 game.next_round()
@@ -422,8 +419,8 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
-    if request.sid in game_players:
-        gid = game_players[request.sid]
+    if request.sid in game_sids:
+        gid = game_sids[request.sid]
         if gid in games:
             game = games[gid]
             for pid in ['p1', 'p2']:
@@ -431,14 +428,16 @@ def handle_disconnect():
                     game.players[pid]['sid'] = None
                     game.connected[pid] = False
                     emit('player_disconnected', {'pid': pid}, room=gid)
+        del game_sids[request.sid]
 
 @socketio.on('join')
 def handle_join(data):
     gid = data.get('gid', 'default')
     pid = data.get('pid')
+    restore = data.get('restore', False)
     
     join_room(gid)
-    game_players[request.sid] = gid
+    game_sids[request.sid] = gid
     
     if gid not in games:
         games[gid] = Game()
@@ -449,9 +448,12 @@ def handle_join(data):
         emit('error', {'msg': 'Неверный ID игрока'})
         return
     
-    if game.connected[pid]:
-        emit('error', {'msg': f'{pid} уже подключен'})
-        return
+    # Если игрок уже был подключен, обновляем его sid
+    if game.connected[pid] and not restore:
+        # Отключаем старого игрока
+        old_sid = game.players[pid]['sid']
+        if old_sid and old_sid != request.sid:
+            emit('force_disconnect', room=old_sid)
     
     game.players[pid]['sid'] = request.sid
     game.connected[pid] = True
@@ -462,6 +464,13 @@ def handle_join(data):
     
     if game.connected['p1'] and game.connected['p2']:
         emit('ready', {'msg': 'Оба игрока готовы!'}, room=gid)
+
+@socketio.on('get_state')
+def handle_get_state(data):
+    gid = game_players.get(request.sid)
+    if not gid or gid not in games:
+        return
+    send_state(gid)
 
 @socketio.on('start')
 def handle_start(data):
@@ -699,6 +708,8 @@ def send_state(gid):
     if game.started and not game.game_over and not game.round_done:
         remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start))
         state['time'] = remaining
+    else:
+        state['time'] = None
     
     emit('state', state, room=gid)
 
