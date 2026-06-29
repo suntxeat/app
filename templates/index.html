@@ -151,25 +151,23 @@
             text-align:center;
             border:1px solid #1e2d45;
             transition:all 0.3s;
+            min-height:160px;
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            align-items:center;
         }
         .box:hover { transform:translateY(-3px); border-color:#58a6ff; box-shadow:0 8px 25px rgba(88,166,255,0.1); }
         .box .icon { font-size:2em; margin-bottom:4px; display:block; }
         .box .price { font-size:1.3em; font-weight:700; color:#34d399; }
         .box .lbl { font-size:0.65em; color:#64748b; margin-top:2px; }
-        .box .hidden { font-size:0.75em; color:#475569; margin-top:4px; font-style:italic; }
-        .box .btns { display:flex; gap:4px; margin-top:8px; }
+        .box .hidden-label { font-size:0.75em; color:#475569; margin-top:4px; font-style:italic; }
+        .box .bought-label { font-size:0.75em; color:#64748b; margin-top:4px; }
+        .box .xray-result { font-size:0.8em; color:#58a6ff; margin-top:4px; font-weight:600; }
+        .box .item-name { font-size:0.9em; color:#58a6ff; margin-top:4px; font-weight:600; }
+        .box .item-value { font-size:0.8em; color:#f59e0b; margin-top:2px; }
+        .box .btns { display:flex; gap:4px; margin-top:8px; width:100%; }
         .box .btns .btn { flex:1; }
-        .box .bought-label {
-            font-size:0.75em;
-            color:#475569;
-            margin-top:4px;
-        }
-        .box .xray-result {
-            font-size:0.85em;
-            color:#58a6ff;
-            margin-top:4px;
-            font-weight:600;
-        }
         .btn {
             padding:4px 10px;
             border:none;
@@ -375,7 +373,7 @@
 
 <script>
 let socket = null, pid = null, gid = 'default', state = null, myItems = [];
-let xrayResults = {};
+let revealedContainers = {}; // {cid: {item, value}} - что видит текущий игрок
 
 function join(p) {
     pid = p;
@@ -405,20 +403,24 @@ function join(p) {
 
     socket.on('xray_result', function(data) {
         msg('ok', '🔍 Рентген: в контейнере ' + data.item + ' (' + data.value + ' очков)');
-        xrayResults[data.cid] = { item: data.item, value: data.value };
+        revealedContainers[data.cid] = { item: data.item, value: data.value };
         updateContainers(state ? state.containers : []);
     });
 
     socket.on('bought', function(data) {
         msg('ok', '✅ Вы купили: ' + data.item + ' (' + data.value + ' очков)');
         myItems.push(data.item);
+        revealedContainers[data.cid] = { item: data.item, value: data.value };
         updateMy();
+        updateContainers(state ? state.containers : []);
     });
 
     socket.on('intercept_result', function(data) {
         msg('ok', '🦅 Перехват: вы забрали ' + data.item + ' (' + data.value + ' очков)');
         myItems.push(data.item);
+        revealedContainers[data.cid] = { item: data.item, value: data.value };
         updateMy();
+        updateContainers(state ? state.containers : []);
     });
 
     socket.on('player_disconnected', function(data) {
@@ -594,45 +596,68 @@ function updateContainers(containers) {
         const div = document.createElement('div');
         div.className = 'box';
 
+        // Проверяем, видит ли текущий игрок содержимое
+        const isRevealed = revealedContainers[c.id] !== undefined;
+        const revealData = revealedContainers[c.id];
+
         if (c.bought) {
+            // Контейнер куплен
             if (state && state.over) {
+                // Игра окончена - показываем всё
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">Куплен</div>
-                    <div style="font-size:0.9em;color:#58a6ff;margin-top:4px;">${c.item}</div>
-                    <div style="font-size:0.8em;color:#f59e0b;">+${c.value} очков</div>
+                    <div class="item-name">${c.item}</div>
+                    <div class="item-value">+${c.value} очков</div>
                     <div style="font-size:0.7em;color:#64748b;margin-top:4px;">💰 ${c.price} фишек</div>
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
-            } else {
-                let xrayHtml = '';
-                if (xrayResults[c.id]) {
-                    xrayHtml = `<div class="xray-result">🔍 ${xrayResults[c.id].item} (+${xrayResults[c.id].value})</div>`;
-                }
+            } else if (isRevealed) {
+                // Игрок видит содержимое (купил или использовал рентген)
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
-                    <div class="hidden">❓ содержимое скрыто</div>
-                    ${xrayHtml}
+                    <div class="item-name">${revealData.item}</div>
+                    <div class="item-value">+${revealData.value} очков</div>
                     <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
+                `;
+            } else {
+                // Скрыто для этого игрока
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="bought-label">✅ Куплен</div>
+                    <div class="hidden-label">❓ содержимое скрыто</div>
+                    <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             }
         } else {
-            let xrayHtml = '';
-            if (xrayResults[c.id]) {
-                xrayHtml = `<div class="xray-result">🔍 ${xrayResults[c.id].item} (+${xrayResults[c.id].value})</div>`;
+            // Контейнер доступен для покупки
+            if (isRevealed) {
+                // Игрок использовал рентген на этом контейнере
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="price">${c.price}</div>
+                    <div class="lbl">фишек</div>
+                    <div class="xray-result">🔍 ${revealData.item} (+${revealData.value})</div>
+                    <div class="btns">
+                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                    </div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="price">${c.price}</div>
+                    <div class="lbl">фишек</div>
+                    <div class="hidden-label">❓ содержимое скрыто</div>
+                    <div class="btns">
+                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                    </div>
+                `;
             }
-            div.innerHTML = `
-                <span class="icon">📦</span>
-                <div class="price">${c.price}</div>
-                <div class="lbl">фишек</div>
-                <div class="hidden">❓ содержимое скрыто</div>
-                ${xrayHtml}
-                <div class="btns">
-                    <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
-                    <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
-                </div>
-            `;
         }
 
         grid.appendChild(div);
@@ -649,7 +674,7 @@ function skipAuction() { socket.emit('skip_auction', { pid: pid }); }
 function resetGame() {
     if (confirm('🔄 Начать новую игру?')) {
         myItems = [];
-        xrayResults = {};
+        revealedContainers = {};
         socket.emit('reset', {});
         document.getElementById('overScreen').style.display = 'none';
         document.getElementById('startBtn').disabled = true;
