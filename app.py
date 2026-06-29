@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import random
 import time
 import os
@@ -75,7 +75,6 @@ class Game:
         self.auction_start = 0
         self.auto_next = False
         self.timer_thread = None
-        self.timer_running = False
         
     def create_containers(self):
         if not self.pool:
@@ -368,11 +367,9 @@ def start_timer(gid):
                 time.sleep(0.5)
                 continue
             
-            # Проверяем время раунда
             if not game.round_done and game.started:
                 game.check_round()
             
-            # Проверяем время аукциона
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -387,7 +384,6 @@ def start_timer(gid):
                     game.auction = None
                     game.check_round()
             
-            # Автоматический переход на следующий раунд
             if game.waiting and game.auto_next and not game.game_over:
                 game.auto_next = False
                 game.next_round()
@@ -414,6 +410,14 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
+    # Очищаем подключение игрока
+    for gid, game in games.items():
+        for pid in ['p1', 'p2']:
+            if game.players[pid]['sid'] == request.sid:
+                game.connected[pid] = False
+                game.players[pid]['sid'] = None
+                print(f"Player {pid} disconnected from game {gid}")
+                send_state(gid)
 
 @socketio.on('join')
 def handle_join(data):
@@ -431,9 +435,14 @@ def handle_join(data):
         emit('error', {'msg': 'Неверный ID игрока'})
         return
     
+    # Если игрок уже подключен с другим сокетом - отключаем старого
     if game.connected[pid]:
-        emit('error', {'msg': f'{pid} уже подключен'})
-        return
+        old_sid = game.players[pid]['sid']
+        if old_sid and old_sid != request.sid:
+            # Отключаем старого игрока
+            game.connected[pid] = False
+            game.players[pid]['sid'] = None
+            print(f"Old player {pid} disconnected, new connection from {request.sid}")
     
     game.players[pid]['sid'] = request.sid
     game.connected[pid] = True
