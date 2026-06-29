@@ -6,8 +6,8 @@ import os
 import threading
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'secret-key')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ---------------------------
 # 1. ИГРОВЫЕ КОНСТАНТЫ
@@ -43,8 +43,6 @@ AUCTION_TIMEOUT = 30
 # ---------------------------
 
 games = {}
-game_players = {}
-game_sids = {}  # {sid: game_id}
 
 class Game:
     def __init__(self):
@@ -72,12 +70,10 @@ class Game:
         self.started = False
         self.connected = {'p1': False, 'p2': False}
         self.round_done = False
-        self.waiting_for_next = False
+        self.waiting = False
         self.round_start = 0
         self.auction_start = 0
-        self.timer_running = False
         self.auto_next = False
-        self.last_state = None
         
     def create_containers(self):
         if not self.pool:
@@ -260,7 +256,7 @@ class Game:
                 winner = 'p1' if 'p1' not in auction['passed'] else 'p2'
                 if self.buy_container(winner, container['id']):
                     self.auction = None
-                    self.message = f"{self.players[winner]['name']} получает контейнер (соперник пасовал)"
+                    self.message = f"{self.players[winner]['name']} получает контейнер"
                     self.check_round()
             return True
             
@@ -295,8 +291,7 @@ class Game:
         
         if not available:
             self.round_done = True
-            self.waiting_for_next = True
-            self.timer_running = False
+            self.waiting = True
             self.message = "Все контейнеры куплены!"
             self.auto_next = True
             return True
@@ -305,8 +300,7 @@ class Game:
             for c in available:
                 c['bought'] = True
             self.round_done = True
-            self.waiting_for_next = True
-            self.timer_running = False
+            self.waiting = True
             self.message = "Время раунда вышло!"
             self.auto_next = True
             return True
@@ -314,7 +308,7 @@ class Game:
         return False
     
     def check_game(self):
-        if self.round >= MAX_ROUNDS and self.waiting_for_next:
+        if self.round >= MAX_ROUNDS and self.waiting:
             for p in self.players.values():
                 p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
             
@@ -337,7 +331,6 @@ class Game:
                     self.winner = 'draw'
             
             self.game_over = True
-            self.timer_running = False
             return True
         return False
     
@@ -348,10 +341,9 @@ class Game:
         self.round += 1
         self.containers = self.create_containers()
         self.round_start = time.time()
-        self.timer_running = True
         self.auction = None
         self.round_done = False
-        self.waiting_for_next = False
+        self.waiting = False
         self.auto_next = False
         self.message = f"Раунд {self.round} начался!"
         
@@ -374,11 +366,9 @@ def start_timer(gid):
                 time.sleep(1)
                 continue
             
-            # Проверяем раунд
             if not game.round_done:
                 game.check_round()
             
-            # Проверяем аукцион
             if game.auction:
                 if time.time() - game.auction_start > AUCTION_TIMEOUT:
                     cid = game.auction['id']
@@ -393,8 +383,7 @@ def start_timer(gid):
                     game.auction = None
                     game.check_round()
             
-            # Автоматический переход
-            if game.waiting_for_next and game.auto_next and not game.game_over:
+            if game.waiting and game.auto_next and not game.game_over:
                 game.auto_next = False
                 game.next_round()
             
@@ -419,25 +408,13 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
-    if request.sid in game_sids:
-        gid = game_sids[request.sid]
-        if gid in games:
-            game = games[gid]
-            for pid in ['p1', 'p2']:
-                if game.players[pid]['sid'] == request.sid:
-                    game.players[pid]['sid'] = None
-                    game.connected[pid] = False
-                    emit('player_disconnected', {'pid': pid}, room=gid)
-        del game_sids[request.sid]
 
 @socketio.on('join')
 def handle_join(data):
     gid = data.get('gid', 'default')
     pid = data.get('pid')
-    restore = data.get('restore', False)
     
     join_room(gid)
-    game_sids[request.sid] = gid
     
     if gid not in games:
         games[gid] = Game()
@@ -448,12 +425,9 @@ def handle_join(data):
         emit('error', {'msg': 'Неверный ID игрока'})
         return
     
-    # Если игрок уже был подключен, обновляем его sid
-    if game.connected[pid] and not restore:
-        # Отключаем старого игрока
-        old_sid = game.players[pid]['sid']
-        if old_sid and old_sid != request.sid:
-            emit('force_disconnect', room=old_sid)
+    if game.connected[pid]:
+        emit('error', {'msg': f'{pid} уже подключен'})
+        return
     
     game.players[pid]['sid'] = request.sid
     game.connected[pid] = True
@@ -465,17 +439,11 @@ def handle_join(data):
     if game.connected['p1'] and game.connected['p2']:
         emit('ready', {'msg': 'Оба игрока готовы!'}, room=gid)
 
-@socketio.on('get_state')
-def handle_get_state(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    send_state(gid)
-
 @socketio.on('start')
 def handle_start(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    
+    if gid not in games:
         return
     
     game = games[gid]
@@ -492,13 +460,14 @@ def handle_start(data):
 
 @socketio.on('buy')
 def handle_buy(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
+    cid = data.get('cid')
+    
+    if gid not in games:
         return
     
     game = games[gid]
-    pid = data.get('pid')
-    cid = data.get('cid')
     
     if not game.started or game.game_over:
         emit('error', {'msg': 'Игра не активна'})
@@ -522,13 +491,14 @@ def handle_buy(data):
 
 @socketio.on('xray')
 def handle_xray(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
+    cid = data.get('cid')
+    
+    if gid not in games:
         return
     
     game = games[gid]
-    pid = data.get('pid')
-    cid = data.get('cid')
     
     if not game.started or game.game_over:
         emit('error', {'msg': 'Игра не активна'})
@@ -546,12 +516,13 @@ def handle_xray(data):
 
 @socketio.on('intercept')
 def handle_intercept(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
+    
+    if gid not in games:
         return
     
     game = games[gid]
-    pid = data.get('pid')
     
     if not game.started or game.game_over:
         emit('error', {'msg': 'Игра не активна'})
@@ -575,13 +546,14 @@ def handle_intercept(data):
 
 @socketio.on('auction')
 def handle_auction(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
+    action = data.get('action')
+    
+    if gid not in games:
         return
     
     game = games[gid]
-    pid = data.get('pid')
-    action = data.get('action')
     
     if not game.started or game.game_over:
         emit('error', {'msg': 'Игра не активна'})
@@ -607,12 +579,13 @@ def handle_auction(data):
 
 @socketio.on('skip_auction')
 def handle_skip_auction(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    pid = data.get('pid')
+    
+    if gid not in games:
         return
     
     game = games[gid]
-    pid = data.get('pid')
     
     if not game.started or game.game_over:
         emit('error', {'msg': 'Игра не активна'})
@@ -627,17 +600,12 @@ def handle_skip_auction(data):
 
 @socketio.on('reset')
 def handle_reset(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
+    gid = data.get('gid', 'default')
+    
+    if gid not in games:
         return
     
     games[gid] = Game()
-    game = games[gid]
-    
-    for pid in ['p1', 'p2']:
-        if game.players[pid]['sid']:
-            game.connected[pid] = True
-    
     send_state(gid)
 
 def send_state(gid):
@@ -646,7 +614,7 @@ def send_state(gid):
     
     game = games[gid]
     
-    if game.round >= MAX_ROUNDS and game.waiting_for_next:
+    if game.round >= MAX_ROUNDS and game.waiting:
         game.check_game()
     
     state = {
@@ -658,7 +626,7 @@ def send_state(gid):
         'auction': game.auction is not None,
         'started': game.started,
         'round_done': game.round_done,
-        'waiting_for_next': game.waiting_for_next,
+        'waiting': game.waiting,
         'players': {},
         'containers': []
     }
