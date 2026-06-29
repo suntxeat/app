@@ -129,7 +129,8 @@
             gap:14px;
         }
         .abilities .used { color:#34d399; }
-        .abilities .avail { color:#475569; }
+        .abilities .avail { color:#fbbf24; }
+        .abilities .disabled { color:#475569; }
         .section {
             font-size:0.8em;
             font-weight:600;
@@ -483,7 +484,7 @@ function update(s) {
     }
 
     if (s.time !== undefined && s.time !== null && !s.round_done) {
-        const pct = (s.time / 30) * 100;
+        const pct = Math.max(0, Math.min(100, (s.time / 30) * 100));
         document.getElementById('timerFill').style.width = pct + '%';
         document.getElementById('timerDisplay').textContent = '⏱️ ' + Math.ceil(s.time) + 'с';
     } else if (s.round_done) {
@@ -577,10 +578,22 @@ function updatePlayer(id, data) {
 
     const x = document.getElementById('p' + p + 'xray');
     const i = document.getElementById('p' + p + 'intercept');
-    x.textContent = data.xray ? 'использован' : 'доступен';
-    x.className = data.xray ? 'used' : 'avail';
-    i.textContent = data.intercept ? 'использован' : 'доступен';
-    i.className = data.intercept ? 'used' : 'avail';
+    
+    if (data.xray) {
+        x.textContent = 'использован';
+        x.className = 'used';
+    } else {
+        x.textContent = 'доступен';
+        x.className = 'avail';
+    }
+    
+    if (data.intercept) {
+        i.textContent = 'использован';
+        i.className = 'used';
+    } else {
+        i.textContent = 'доступен';
+        i.className = 'avail';
+    }
 }
 
 function updateContainers(containers) {
@@ -594,6 +607,9 @@ function updateContainers(containers) {
         return;
     }
 
+    const you = state ? state.players[pid] : null;
+    const isGameOver = state ? state.over : false;
+
     containers.forEach(c => {
         const div = document.createElement('div');
         div.className = 'box';
@@ -601,7 +617,8 @@ function updateContainers(containers) {
         const revealData = revealed[c.id];
 
         if (c.bought) {
-            if (state && state.over) {
+            if (isGameOver) {
+                // В конце игры показываем всё
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">Куплен</div>
@@ -610,7 +627,8 @@ function updateContainers(containers) {
                     <div style="font-size:0.7em;color:#64748b;margin-top:4px;">💰 ${c.price} фишек</div>
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
-            } else if (isRevealed) {
+            } else if (isRevealed && c.buyer === pid) {
+                // Свой купленный контейнер - видим содержимое
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
@@ -620,6 +638,7 @@ function updateContainers(containers) {
                     <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
                 `;
             } else {
+                // Чужой купленный контейнер - скрыт
                 div.innerHTML = `
                     <span class="icon">📦</span>
                     <div class="bought-label">✅ Куплен</div>
@@ -628,6 +647,10 @@ function updateContainers(containers) {
                 `;
             }
         } else {
+            // Не куплен
+            const canBuy = you && !isGameOver && state.started && !state.round_done;
+            const canXray = you && !isGameOver && state.started && !you.xray && !state.round_done;
+            
             if (isRevealed) {
                 div.innerHTML = `
                     <span class="icon">📦</span>
@@ -635,8 +658,8 @@ function updateContainers(containers) {
                     <div class="lbl">фишек</div>
                     <div class="xray-result">🔍 ${revealData.item} (+${revealData.value})</div>
                     <div class="btns">
-                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
-                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                        <button class="btn btn-green" onclick="buy(${c.id})" ${!canBuy ? 'disabled' : ''}>💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})" ${!canXray ? 'disabled' : ''}>🔍 Рентген</button>
                     </div>
                 `;
             } else {
@@ -646,8 +669,8 @@ function updateContainers(containers) {
                     <div class="lbl">фишек</div>
                     <div class="hidden-label">❓ содержимое скрыто</div>
                     <div class="btns">
-                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
-                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                        <button class="btn btn-green" onclick="buy(${c.id})" ${!canBuy ? 'disabled' : ''}>💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})" ${!canXray ? 'disabled' : ''}>🔍 Рентген</button>
                     </div>
                 `;
             }
@@ -656,12 +679,30 @@ function updateContainers(containers) {
     });
 }
 
-function startGame() { socket.emit('start', { gid: gid }); document.getElementById('startBtn').disabled = true; }
-function buy(cid) { socket.emit('buy', { gid: gid, pid: pid, cid: cid }); }
-function xray(cid) { socket.emit('xray', { gid: gid, pid: pid, cid: cid }); }
-function intercept() { socket.emit('intercept', { gid: gid, pid: pid }); }
-function auction(action) { socket.emit('auction', { gid: gid, pid: pid, action: action }); }
-function skipAuction() { socket.emit('skip_auction', { gid: gid, pid: pid }); }
+function startGame() { 
+    socket.emit('start', { gid: gid }); 
+    document.getElementById('startBtn').disabled = true; 
+}
+
+function buy(cid) { 
+    socket.emit('buy', { gid: gid, pid: pid, cid: cid }); 
+}
+
+function xray(cid) { 
+    socket.emit('xray', { gid: gid, pid: pid, cid: cid }); 
+}
+
+function intercept() { 
+    socket.emit('intercept', { gid: gid, pid: pid }); 
+}
+
+function auction(action) { 
+    socket.emit('auction', { gid: gid, pid: pid, action: action }); 
+}
+
+function skipAuction() { 
+    socket.emit('skip_auction', { gid: gid, pid: pid }); 
+}
 
 function resetGame() {
     if (confirm('🔄 Начать новую игру?')) {
@@ -672,7 +713,6 @@ function resetGame() {
         document.getElementById('startBtn').disabled = true;
         document.getElementById('interceptBtn').disabled = false;
         msg('info', '🔄 Новая игра');
-        setTimeout(() => location.reload(), 500);
     }
 }
 
