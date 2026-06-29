@@ -1,711 +1,686 @@
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room
-import random
-import time
-import os
-import threading
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Контейнеры</title>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e17;
+            min-height:100vh;
+            padding:16px;
+            color:#e6edf3;
+        }
+        .container {
+            max-width:1100px;
+            margin:0 auto;
+            background:#141b2b;
+            border-radius:16px;
+            padding:20px;
+            border:1px solid #1e2d45;
+        }
+        .header {
+            text-align:center;
+            padding:10px 0 18px;
+            border-bottom:1px solid #1e2d45;
+            margin-bottom:18px;
+        }
+        .header h1 {
+            font-size:2em;
+            font-weight:700;
+            letter-spacing:3px;
+            background:linear-gradient(135deg,#58a6ff,#7c3aed);
+            -webkit-background-clip:text;
+            -webkit-text-fill-color:transparent;
+        }
+        .header h1 span {
+            background:linear-gradient(135deg,#f59e0b,#f97316);
+            -webkit-background-clip:text;
+            -webkit-text-fill-color:transparent;
+        }
+        .status {
+            background:rgba(13,23,38,0.8);
+            padding:10px 18px;
+            border-radius:10px;
+            margin-bottom:14px;
+            display:flex;
+            justify-content:space-between;
+            flex-wrap:wrap;
+            border:1px solid #1e2d45;
+            font-size:0.9em;
+        }
+        .status .round { color:#58a6ff; font-weight:600; }
+        .status .player { color:#34d399; font-weight:600; }
+        .status .timer { color:#f59e0b; font-weight:600; }
+        .msg {
+            padding:8px 14px;
+            border-radius:8px;
+            margin-bottom:12px;
+            background:rgba(13,23,38,0.8);
+            border-left:4px solid #58a6ff;
+            color:#94a3b8;
+            min-height:38px;
+            display:flex;
+            align-items:center;
+            font-size:0.9em;
+        }
+        .msg.ok { border-left-color:#34d399; color:#6ee7b7; }
+        .msg.err { border-left-color:#ef4444; color:#f87171; }
+        .msg.warn { border-left-color:#f59e0b; color:#fbbf24; }
+        .players {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:14px;
+            margin-bottom:18px;
+        }
+        .card {
+            background:rgba(13,23,38,0.8);
+            border-radius:12px;
+            padding:14px 16px;
+            border:1px solid #1e2d45;
+            transition:all 0.3s;
+        }
+        .card.you { border-color:#58a6ff; box-shadow:0 0 30px rgba(88,166,255,0.08); }
+        .card .name { font-weight:600; font-size:1em; margin-bottom:8px; color:#e6edf3; }
+        .card .name .badge { font-size:0.65em; color:#58a6ff; background:rgba(88,166,255,0.15); padding:2px 12px; border-radius:20px; margin-left:8px; border:1px solid rgba(88,166,255,0.2); }
+        .stats {
+            display:grid;
+            grid-template-columns:repeat(3,1fr);
+            gap:6px;
+            margin-bottom:8px;
+        }
+        .stat {
+            background:rgba(0,0,0,0.3);
+            padding:4px;
+            border-radius:6px;
+            text-align:center;
+        }
+        .stat .lbl { font-size:0.55em; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; }
+        .stat .val { font-size:1.1em; font-weight:600; margin-top:1px; }
+        .stat .val.chips { color:#34d399; }
+        .stat .val.score { color:#f59e0b; }
+        .stat .val.hidden { color:#475569; font-size:1.3em; }
+        .stat .val.containers { color:#58a6ff; }
+        .clist {
+            display:flex;
+            flex-wrap:wrap;
+            gap:4px;
+            min-height:22px;
+            margin-top:4px;
+        }
+        .tag {
+            background:rgba(0,0,0,0.3);
+            padding:1px 10px;
+            border-radius:20px;
+            font-size:0.7em;
+            border:1px solid #1e2d45;
+            color:#94a3b8;
+        }
+        .tag.yours { border-color:#58a6ff; color:#58a6ff; background:rgba(88,166,255,0.08); }
+        .tag.hidden { color:#475569; font-style:italic; }
+        .abilities {
+            margin-top:6px;
+            font-size:0.7em;
+            color:#64748b;
+            display:flex;
+            gap:14px;
+        }
+        .abilities .used { color:#34d399; }
+        .abilities .avail { color:#475569; }
+        .section {
+            font-size:0.8em;
+            font-weight:600;
+            color:#94a3b8;
+            margin:12px 0 8px;
+            text-transform:uppercase;
+            letter-spacing:0.5px;
+        }
+        .grid {
+            display:grid;
+            grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+            gap:12px;
+            margin:8px 0 14px;
+        }
+        .box {
+            background:linear-gradient(145deg,#1a2440,#0f1a2e);
+            border-radius:14px;
+            padding:14px 12px;
+            text-align:center;
+            border:1px solid #1e2d45;
+            transition:all 0.3s;
+            min-height:160px;
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+            align-items:center;
+        }
+        .box:hover { transform:translateY(-3px); border-color:#58a6ff; box-shadow:0 8px 25px rgba(88,166,255,0.1); }
+        .box .icon { font-size:2em; margin-bottom:4px; display:block; }
+        .box .price { font-size:1.3em; font-weight:700; color:#34d399; }
+        .box .lbl { font-size:0.65em; color:#64748b; margin-top:2px; }
+        .box .hidden-label { font-size:0.75em; color:#475569; margin-top:4px; font-style:italic; }
+        .box .bought-label { font-size:0.75em; color:#64748b; margin-top:4px; }
+        .box .xray-result { font-size:0.8em; color:#58a6ff; margin-top:4px; font-weight:600; }
+        .box .item-name { font-size:0.9em; color:#58a6ff; margin-top:4px; font-weight:600; }
+        .box .item-value { font-size:0.8em; color:#f59e0b; margin-top:2px; }
+        .box .btns { display:flex; gap:4px; margin-top:8px; width:100%; }
+        .box .btns .btn { flex:1; }
+        .btn {
+            padding:4px 10px;
+            border:none;
+            border-radius:6px;
+            font-size:0.7em;
+            font-weight:600;
+            cursor:pointer;
+            transition:all 0.2s;
+        }
+        .btn:hover { transform:translateY(-1px); filter:brightness(1.1); }
+        .btn:active { transform:scale(0.95); }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+        .btn-green { background:#22c55e; color:#0a0e17; }
+        .btn-gray { background:#334155; color:#94a3b8; }
+        .btn-yellow { background:#f59e0b; color:#0a0e17; }
+        .btn-red { background:#ef4444; color:#fff; }
+        .btn-purple { background:#7c3aed; color:#fff; }
+        .btn-pink { background:#ec4899; color:#fff; }
+        .btn-blue { background:#3b82f6; color:#fff; }
+        .btn-cyan { background:#06b6d4; color:#0a0e17; }
+        .actions {
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+            margin:10px 0;
+        }
+        .actions .btn {
+            flex:1;
+            min-width:80px;
+            padding:6px 14px;
+            font-size:0.8em;
+        }
+        .auction {
+            background:linear-gradient(135deg,#1a1a2e,#16213e);
+            border:2px solid #f59e0b;
+            border-radius:14px;
+            padding:16px;
+            margin:10px 0;
+            animation:pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%,100% { box-shadow:0 0 20px rgba(245,158,11,0.05); }
+            50% { box-shadow:0 0 40px rgba(245,158,11,0.15); }
+        }
+        .auction .title { font-size:1em; font-weight:700; color:#f59e0b; margin-bottom:6px; }
+        .auction .info { color:#94a3b8; font-size:0.85em; }
+        .auction .info strong { color:#e6edf3; }
+        .auction .btns { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+        .auction .btns .btn { flex:1; min-width:60px; padding:4px 12px; font-size:0.75em; }
+        .bar {
+            width:100%;
+            height:3px;
+            background:#1e2d45;
+            border-radius:3px;
+            overflow:hidden;
+            margin:6px 0;
+        }
+        .fill {
+            height:100%;
+            background:linear-gradient(90deg,#22c55e,#f59e0b,#ef4444);
+            transition:width 1s linear;
+        }
+        .over {
+            background:linear-gradient(145deg,#1a2440,#0f1a2e);
+            border:2px solid #f59e0b;
+            border-radius:14px;
+            padding:18px;
+            margin:12px 0;
+            text-align:center;
+        }
+        .over .title { font-size:1.6em; font-weight:700; color:#f59e0b; margin-bottom:6px; }
+        .over .msg { color:#94a3b8; font-size:0.95em; margin-bottom:10px; }
+        .over .details {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:12px;
+            margin:10px 0;
+        }
+        .over .player {
+            background:rgba(0,0,0,0.3);
+            padding:12px;
+            border-radius:10px;
+            text-align:left;
+        }
+        .over .player .name { font-weight:600; color:#e6edf3; margin-bottom:4px; }
+        .over .player .line { color:#94a3b8; font-size:0.8em; margin:2px 0; }
+        .over .player .line strong { color:#e6edf3; }
+        .join {
+            text-align:center;
+            padding:30px 20px;
+        }
+        .join .title { font-size:1.4em; font-weight:300; color:#e6edf3; margin-bottom:4px; }
+        .join .sub { color:#64748b; margin-bottom:16px; }
+        .join .btns { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+        .join .btns .btn { padding:8px 28px; font-size:0.95em; min-width:90px; }
+        .empty { color:#475569; text-align:center; padding:12px; font-style:italic; font-size:0.8em; }
+        @media(max-width:768px){
+            .container{padding:12px;}
+            .players{grid-template-columns:1fr;}
+            .grid{grid-template-columns:1fr 1fr;}
+            .header h1{font-size:1.4em;}
+            .status{font-size:0.75em;}
+            .over .details{grid-template-columns:1fr;}
+            .actions .btn{min-width:60px;font-size:0.7em;padding:5px 8px;}
+        }
+        @media(max-width:480px){
+            .grid{grid-template-columns:1fr;}
+            .stats{grid-template-columns:1fr 1fr;}
+            .header h1{font-size:1.2em;}
+            .join .btns .btn{padding:6px 16px;font-size:0.8em;}
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><h1>📦 КОНТ<span>ЕЙНЕРЫ</span></h1></div>
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+    <div id="app">
+        <div id="joinScreen" class="join">
+            <div class="title">👋 Добро пожаловать</div>
+            <div class="sub">Выберите игрока для подключения</div>
+            <div class="btns">
+                <button class="btn btn-green" onclick="join('p1')">🎮 Игрок 1</button>
+                <button class="btn btn-blue" onclick="join('p2')">🎮 Игрок 2</button>
+            </div>
+            <div style="margin-top:12px;color:#475569;font-size:0.75em;">Подключайтесь с разных устройств</div>
+        </div>
 
-# ---------------------------
-# 1. ИГРОВЫЕ КОНСТАНТЫ
-# ---------------------------
+        <div id="gameScreen" style="display:none;">
+            <div class="status">
+                <span class="round" id="roundInfo">📊 Раунд: 0 / 3</span>
+                <span class="player" id="playerInfo">👤 Вы: --</span>
+                <span class="timer" id="timerDisplay">⏱️ --</span>
+            </div>
 
-ITEMS = {
-    "Алмаз": 500, "Золотой слиток": 400, "Платина": 350,
-    "Серебро": 200, "Бронза": 120, "Яхта": 200,
-    "Дом": 100, "Квартира": 85, "Машина": 70,
-    "Мотоцикл": 55, "Мебель": 40, "Телевизор": 35,
-    "Ноутбук": 30, "Телефон": 25, "Планшет": 20,
-    "Велосипед": -20, "Самокат": -15, "Ролики": -10,
-    "Лыжи": -5, "Коньки": -8, "Билет в кино": 15,
-    "Билет в театр": 25, "Билет на концерт": 35,
-    "Ресторан": 45, "Spa-салон": 55, "Путешествие": 80,
-    "Круиз": 120, "Отель": 65, "Вино": 20,
-    "Шампанское": 30, "Коньяк": 40, "Шоколад": 10,
-    "Торт": 15, "Цветы": 12, "Духи": 45,
-    "Часы": 60, "Кольцо": 90, "Ожерелье": 110
+            <div class="msg" id="msgBox">🔄 Загрузка...</div>
+
+            <div class="players">
+                <div class="card" id="p1card">
+                    <div class="name"><span id="p1name">Игрок 1</span><span class="badge" id="p1badge"></span></div>
+                    <div class="stats">
+                        <div class="stat"><div class="lbl">💰 Фишки</div><div class="val chips" id="p1chips">150</div></div>
+                        <div class="stat"><div class="lbl">⭐ Очки</div><div class="val hidden" id="p1score">?</div></div>
+                        <div class="stat"><div class="lbl">📦 Конт.</div><div class="val containers" id="p1count">0</div></div>
+                    </div>
+                    <div class="clist" id="p1list"></div>
+                    <div class="abilities">
+                        <span>🔍 Рентген: <span id="p1xray">доступен</span></span>
+                        <span>🦅 Перехват: <span id="p1intercept">доступен</span></span>
+                    </div>
+                </div>
+
+                <div class="card" id="p2card">
+                    <div class="name"><span id="p2name">Игрок 2</span><span class="badge" id="p2badge"></span></div>
+                    <div class="stats">
+                        <div class="stat"><div class="lbl">💰 Фишки</div><div class="val chips" id="p2chips">150</div></div>
+                        <div class="stat"><div class="lbl">⭐ Очки</div><div class="val hidden" id="p2score">?</div></div>
+                        <div class="stat"><div class="lbl">📦 Конт.</div><div class="val containers" id="p2count">0</div></div>
+                    </div>
+                    <div class="clist" id="p2list"></div>
+                    <div class="abilities">
+                        <span>🔍 Рентген: <span id="p2xray">доступен</span></span>
+                        <span>🦅 Перехват: <span id="p2intercept">доступен</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">📦 Контейнеры на столе</div>
+            <div class="grid" id="grid"></div>
+
+            <div id="auctionArea" style="display:none;">
+                <div class="auction">
+                    <div class="title">🔨 АУКЦИОН</div>
+                    <div class="info" id="auctionInfo"></div>
+                    <div class="btns">
+                        <button class="btn btn-yellow" onclick="auction('raise')">⬆ Повысить (+10)</button>
+                        <button class="btn btn-red" onclick="auction('pass')">🙅 Пас</button>
+                        <button class="btn btn-green" onclick="auction('buy')">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="skipAuction()">⏭ Пропустить</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-green" onclick="startGame()" id="startBtn">🚀 Начать игру</button>
+                <button class="btn btn-purple" onclick="intercept()" id="interceptBtn">🦅 Перехват</button>
+                <button class="btn btn-pink" onclick="resetGame()" id="resetBtn">🔄 Новая игра</button>
+            </div>
+
+            <div class="bar"><div class="fill" id="timerFill" style="width:100%"></div></div>
+
+            <div id="overScreen" style="display:none;">
+                <div class="over">
+                    <div class="title">🏆 ИГРА ОКОНЧЕНА</div>
+                    <div class="msg" id="overMsg"></div>
+                    <div class="details" id="overDetails"></div>
+                    <button class="btn btn-green" onclick="resetGame()" style="padding:6px 24px;">🔄 Новая игра</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let socket = null, pid = null, gid = 'default', state = null, myItems = [];
+let revealed = {};
+
+function join(p) {
+    pid = p;
+    document.getElementById('joinScreen').style.display = 'none';
+    document.getElementById('gameScreen').style.display = 'block';
+
+    socket = io();
+
+    socket.on('connect', function() {
+        socket.emit('join', { gid: gid, pid: pid });
+    });
+
+    socket.on('assigned', function(data) {
+        document.getElementById('playerInfo').textContent = '👤 Вы: ' + data.name;
+        const card = document.getElementById(data.pid + 'card');
+        if (card) card.classList.add('you');
+        const badge = document.getElementById(data.pid + 'badge');
+        if (badge) badge.textContent = 'вы';
+    });
+
+    socket.on('ready', function(data) {
+        msg('ok', '✅ ' + data.msg + ' Нажмите "Начать игру"');
+        document.getElementById('startBtn').disabled = false;
+    });
+
+    socket.on('state', function(s) { update(s); });
+
+    socket.on('xray_result', function(data) {
+        msg('ok', '🔍 Рентген: ' + data.item + ' (+' + data.value + ' очков)');
+        revealed[data.cid] = { item: data.item, value: data.value };
+        if (state) updateContainers(state.containers);
+    });
+
+    socket.on('bought', function(data) {
+        msg('ok', '✅ Вы купили: ' + data.item + ' (+' + data.value + ' очков)');
+        myItems.push(data.item);
+        revealed[data.cid] = { item: data.item, value: data.value };
+        updateMy();
+        if (state) updateContainers(state.containers);
+    });
+
+    socket.on('intercept_result', function(data) {
+        msg('ok', '🦅 Перехват: ' + data.item + ' (+' + data.value + ' очков)');
+        myItems.push(data.item);
+        revealed[data.cid] = { item: data.item, value: data.value };
+        updateMy();
+        if (state) updateContainers(state.containers);
+    });
+
+    socket.on('player_disconnected', function(data) {
+        msg('warn', '⚠️ ' + data.pid + ' отключился');
+    });
+
+    socket.on('error', function(data) { msg('err', '❌ ' + data.msg); });
+    socket.on('disconnect', function() { msg('err', '❌ Соединение потеряно'); });
 }
 
-VALUES = ITEMS
+function msg(type, text) {
+    const box = document.getElementById('msgBox');
+    box.textContent = text;
+    box.className = 'msg';
+    if (type === 'ok') box.classList.add('ok');
+    else if (type === 'err') box.classList.add('err');
+    else if (type === 'warn') box.classList.add('warn');
+}
 
-MAX_ROUNDS = 3
-MIN_CONTAINERS = 2
-AUCTION_STEP = 10
-AUCTION_MAX_RAISES = 3
-ROUND_TIMEOUT = 30
-AUCTION_TIMEOUT = 30
-
-# ---------------------------
-# 2. КЛАСС ИГРЫ
-# ---------------------------
-
-games = {}
-game_players = {}
-
-class Game:
-    def __init__(self):
-        self.reset()
-    
-    def reset(self):
-        # Создаем пул предметов
-        self.pool = []
-        for item, val in ITEMS.items():
-            count = 2 if random.random() > 0.6 else 1
-            self.pool.extend([item] * count)
-        random.shuffle(self.pool)
-        
-        self.round = 0
-        self.players = {
-            'p1': {'name': 'Игрок 1', 'chips': 150, 'containers': [], 'score': 0, 
-                   'xray': False, 'intercept': False, 'sid': None},
-            'p2': {'name': 'Игрок 2', 'chips': 150, 'containers': [], 'score': 0,
-                   'xray': False, 'intercept': False, 'sid': None}
-        }
-        self.containers = []
-        self.auction = None
-        self.game_over = False
-        self.winner = None
-        self.message = "Добро пожаловать!"
-        self.started = False
-        self.connected = {'p1': False, 'p2': False}
-        self.round_done = False
-        self.waiting_for_next = False
-        self.round_start = 0
-        self.auction_start = 0
-        self.timer_running = False
-        self.auto_next = False
-        
-    def create_containers(self):
-        """Создает контейнеры для раунда (1-5 штук)"""
-        if not self.pool:
-            self.pool = []
-            for item, val in ITEMS.items():
-                count = 2 if random.random() > 0.6 else 1
-                self.pool.extend([item] * count)
-            random.shuffle(self.pool)
-        
-        count = random.randint(1, 5)
-        count = min(count, len(self.pool))
-        containers = []
-        
-        for i in range(count):
-            if not self.pool:
-                break
-            item = self.pool.pop()
-            price = random.randint(5, 80)
-            containers.append({
-                'id': i,
-                'item': item,
-                'price': price,
-                'value': VALUES.get(item, 0),
-                'bought': False,
-                'buyer': None,
-                'revealed_to': []
-            })
-        return containers
-    
-    def get_available(self):
-        return [c for c in self.containers if not c['bought']]
-    
-    def buy_container(self, pid, cid):
-        player = self.players[pid]
-        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
-        
-        if not container:
-            self.message = "Контейнер уже куплен"
-            return False
-        
-        if player['chips'] < container['price']:
-            self.message = f"Не хватает фишек! Нужно {container['price']}"
-            return False
-        
-        player['chips'] -= container['price']
-        player['containers'].append(container['item'])
-        container['bought'] = True
-        container['buyer'] = pid
-        if pid not in container['revealed_to']:
-            container['revealed_to'].append(pid)
-        
-        self.message = f"{player['name']} купил контейнер"
-        return True
-    
-    def use_xray(self, pid, cid):
-        player = self.players[pid]
-        
-        if player['xray']:
-            self.message = "Рентген уже использован"
-            return None
-        
-        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
-        if not container:
-            self.message = "Контейнер не найден"
-            return None
-        
-        player['xray'] = True
-        if pid not in container['revealed_to']:
-            container['revealed_to'].append(pid)
-        self.message = f"{player['name']} использовал рентген"
-        return container['item']
-    
-    def use_intercept(self, pid):
-        player = self.players[pid]
-        other = 'p2' if pid == 'p1' else 'p1'
-        other_player = self.players[other]
-        
-        if player['intercept']:
-            self.message = "Перехват уже использован"
-            return False
-        
-        last = None
-        for c in reversed(self.containers):
-            if c['bought'] and c['buyer'] == other:
-                last = c
-                break
-        
-        if not last:
-            self.message = "Нет контейнеров для перехвата"
-            return False
-        
-        other_player['containers'].remove(last['item'])
-        other_player['chips'] += last['price']
-        player['containers'].append(last['item'])
-        last['buyer'] = pid
-        if pid not in last['revealed_to']:
-            last['revealed_to'].append(pid)
-        player['intercept'] = True
-        
-        self.message = f"{player['name']} перехватил контейнер"
-        return True
-    
-    def start_auction(self, cid):
-        container = next((c for c in self.containers if c['id'] == cid and not c['bought']), None)
-        if not container:
-            return False
-        
-        self.auction = {
-            'id': cid,
-            'price': container['price'],
-            'raises': 0,
-            'leader': None,
-            'passed': [],
-            'start': time.time()
-        }
-        self.auction_start = time.time()
-        self.message = f"Аукцион! Старт: {container['price']} фишек"
-        return True
-    
-    def auction_bid(self, pid, action):
-        if not self.auction:
-            self.message = "Аукцион не активен"
-            return False
-        
-        player = self.players[pid]
-        auction = self.auction
-        
-        if pid in auction['passed']:
-            self.message = "Вы уже пасовали"
-            return False
-        
-        container = next((c for c in self.containers if c['id'] == auction['id']), None)
-        if not container or container['bought']:
-            self.message = "Контейнер уже куплен"
-            return False
-        
-        if time.time() - self.auction_start > AUCTION_TIMEOUT:
-            self.auction = None
-            if auction['leader']:
-                if self.buy_container(auction['leader'], container['id']):
-                    self.message = f"Время вышло! {self.players[auction['leader']]['name']} забирает"
-            else:
-                container['bought'] = True
-                self.message = "Время аукциона вышло!"
-            self.check_round()
-            return True
-        
-        if action == 'raise':
-            if auction['raises'] >= AUCTION_MAX_RAISES:
-                self.message = "Достигнут лимит повышений (3)"
-                return False
-            
-            if player['chips'] < auction['price'] + AUCTION_STEP:
-                self.message = "Не хватает фишек для повышения"
-                return False
-            
-            auction['price'] += AUCTION_STEP
-            auction['raises'] += 1
-            auction['leader'] = pid
-            
-            self.message = f"{player['name']} повысил до {auction['price']}"
-            
-            if auction['raises'] >= AUCTION_MAX_RAISES:
-                if self.buy_container(pid, container['id']):
-                    self.auction = None
-                    self.message = f"{player['name']} выиграл аукцион!"
-                    self.check_round()
-            return True
-            
-        elif action == 'pass':
-            auction['passed'].append(pid)
-            self.message = f"{player['name']} пасует"
-            
-            if len(auction['passed']) >= 2:
-                self.auction = None
-                container['bought'] = True
-                self.message = "Оба пасовали! Контейнер ушел в сброс"
-                self.check_round()
-            elif len(auction['passed']) == 1:
-                winner = 'p1' if 'p1' not in auction['passed'] else 'p2'
-                if self.buy_container(winner, container['id']):
-                    self.auction = None
-                    self.message = f"{self.players[winner]['name']} получает контейнер (соперник пасовал)"
-                    self.check_round()
-            return True
-            
-        elif action == 'buy':
-            if player['chips'] < auction['price']:
-                self.message = "Не хватает фишек"
-                return False
-            
-            if self.buy_container(pid, container['id']):
-                self.auction = None
-                self.message = f"{player['name']} купил контейнер!"
-                self.check_round()
-                return True
-        
-        return False
-    
-    def skip_auction(self, pid):
-        if not self.auction:
-            return False
-        
-        container = next((c for c in self.containers if c['id'] == self.auction['id']), None)
-        if container:
-            container['bought'] = True
-            self.auction = None
-            self.message = f"{self.players[pid]['name']} пропустил аукцион"
-            self.check_round()
-            return True
-        return False
-    
-    def check_round(self):
-        available = self.get_available()
-        
-        if not available:
-            self.round_done = True
-            self.waiting_for_next = True
-            self.timer_running = False
-            if not self.game_over:
-                self.message = "Все контейнеры куплены!"
-                self.auto_next = True
-            return True
-        
-        if self.started and time.time() - self.round_start > ROUND_TIMEOUT:
-            for c in available:
-                c['bought'] = True
-            self.round_done = True
-            self.waiting_for_next = True
-            self.timer_running = False
-            if not self.game_over:
-                self.message = "Время раунда вышло!"
-                self.auto_next = True
-            return True
-        
-        return False
-    
-    def check_game(self):
-        if self.round >= MAX_ROUNDS and self.waiting_for_next:
-            for p in self.players.values():
-                p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
-            
-            p1, p2 = self.players['p1'], self.players['p2']
-            
-            if len(p1['containers']) < MIN_CONTAINERS:
-                self.winner = 'p2'
-            elif len(p2['containers']) < MIN_CONTAINERS:
-                self.winner = 'p1'
-            elif p1['score'] > p2['score']:
-                self.winner = 'p1'
-            elif p2['score'] > p1['score']:
-                self.winner = 'p2'
-            else:
-                if p1['chips'] > p2['chips']:
-                    self.winner = 'p1'
-                elif p2['chips'] > p1['chips']:
-                    self.winner = 'p2'
-                else:
-                    self.winner = 'draw'
-            
-            self.game_over = True
-            self.timer_running = False
-            return True
-        return False
-    
-    def next_round(self):
-        if self.round >= MAX_ROUNDS:
-            return
-        
-        self.round += 1
-        self.containers = self.create_containers()
-        self.round_start = time.time()
-        self.timer_running = True
-        self.auction = None
-        self.round_done = False
-        self.waiting_for_next = False
-        self.auto_next = False
-        self.message = f"Раунд {self.round} начался!"
-        
-        # Если только 1 контейнер - запускаем аукцион
-        available = self.get_available()
-        if len(available) == 1:
-            self.start_auction(available[0]['id'])
-
-# ---------------------------
-# 3. ТАЙМЕР
-# ---------------------------
-
-def start_timer(gid):
-    def timer_loop():
-        while gid in games:
-            game = games.get(gid)
-            if not game:
-                break
-            
-            if not game.started or game.game_over:
-                time.sleep(1)
-                continue
-            
-            # Проверяем раунд
-            if not game.round_done:
-                game.check_round()
-            
-            # Проверяем аукцион
-            if game.auction:
-                if time.time() - game.auction_start > AUCTION_TIMEOUT:
-                    cid = game.auction['id']
-                    container = next((c for c in game.containers if c['id'] == cid), None)
-                    if container and not container['bought']:
-                        if game.auction['leader']:
-                            game.buy_container(game.auction['leader'], cid)
-                            game.message = f"Время вышло! {game.players[game.auction['leader']]['name']} забирает"
-                        else:
-                            container['bought'] = True
-                            game.message = "Время аукциона вышло!"
-                    game.auction = None
-                    game.check_round()
-            
-            # Автоматический переход на следующий раунд
-            if game.waiting_for_next and game.auto_next and not game.game_over:
-                game.auto_next = False
-                game.next_round()
-            
-            send_state(gid)
-            time.sleep(1)
-    
-    thread = threading.Thread(target=timer_loop, daemon=True)
-    thread.start()
-
-# ---------------------------
-# 4. ОБРАБОТЧИКИ СОКЕТОВ
-# ---------------------------
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@socketio.on('connect')
-def handle_connect():
-    print(f"Client connected: {request.sid}")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print(f"Client disconnected: {request.sid}")
-    if request.sid in game_players:
-        gid = game_players[request.sid]
-        if gid in games:
-            game = games[gid]
-            for pid in ['p1', 'p2']:
-                if game.players[pid]['sid'] == request.sid:
-                    game.players[pid]['sid'] = None
-                    game.connected[pid] = False
-                    emit('player_disconnected', {'pid': pid}, room=gid)
-
-@socketio.on('join')
-def handle_join(data):
-    gid = data.get('gid', 'default')
-    pid = data.get('pid')
-    
-    join_room(gid)
-    game_players[request.sid] = gid
-    
-    if gid not in games:
-        games[gid] = Game()
-    
-    game = games[gid]
-    
-    if pid not in ['p1', 'p2']:
-        emit('error', {'msg': 'Неверный ID игрока'})
-        return
-    
-    if game.connected[pid]:
-        emit('error', {'msg': f'{pid} уже подключен'})
-        return
-    
-    game.players[pid]['sid'] = request.sid
-    game.connected[pid] = True
-    
-    emit('assigned', {'pid': pid, 'name': game.players[pid]['name']})
-    
-    send_state(gid)
-    
-    if game.connected['p1'] and game.connected['p2']:
-        emit('ready', {'msg': 'Оба игрока готовы!'}, room=gid)
-
-@socketio.on('start')
-def handle_start(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    
-    if not (game.connected['p1'] and game.connected['p2']):
-        emit('error', {'msg': 'Оба игрока должны быть подключены'})
-        return
-    
-    if not game.started:
-        game.started = True
-        game.next_round()
-        start_timer(gid)
-        send_state(gid)
-
-@socketio.on('buy')
-def handle_buy(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    pid = data.get('pid')
-    cid = data.get('cid')
-    
-    if not game.started or game.game_over:
-        emit('error', {'msg': 'Игра не активна'})
-        return
-    
-    if game.auction:
-        emit('error', {'msg': 'Идет аукцион!'})
-        return
-    
-    container = next((c for c in game.containers if c['id'] == cid and not c['bought']), None)
-    if container:
-        if game.buy_container(pid, cid):
-            emit('bought', {
-                'item': container['item'],
-                'value': container['value'],
-                'cid': cid
-            }, room=request.sid)
-    
-    game.check_round()
-    send_state(gid)
-
-@socketio.on('xray')
-def handle_xray(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    pid = data.get('pid')
-    cid = data.get('cid')
-    
-    if not game.started or game.game_over:
-        emit('error', {'msg': 'Игра не активна'})
-        return
-    
-    result = game.use_xray(pid, cid)
-    if result:
-        emit('xray_result', {
-            'item': result,
-            'value': VALUES.get(result, 0),
-            'cid': cid
-        }, room=request.sid)
-    
-    send_state(gid)
-
-@socketio.on('intercept')
-def handle_intercept(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    pid = data.get('pid')
-    
-    if not game.started or game.game_over:
-        emit('error', {'msg': 'Игра не активна'})
-        return
-    
-    other = 'p2' if pid == 'p1' else 'p1'
-    last = None
-    for c in reversed(game.containers):
-        if c['bought'] and c['buyer'] == other:
-            last = c
-            break
-    
-    if last and game.use_intercept(pid):
-        emit('intercept_result', {
-            'item': last['item'],
-            'value': last['value'],
-            'cid': last['id']
-        }, room=request.sid)
-    
-    send_state(gid)
-
-@socketio.on('auction')
-def handle_auction(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    pid = data.get('pid')
-    action = data.get('action')
-    
-    if not game.started or game.game_over:
-        emit('error', {'msg': 'Игра не активна'})
-        return
-    
-    if not game.auction:
-        emit('error', {'msg': 'Аукцион не активен'})
-        return
-    
-    cid = game.auction['id']
-    game.auction_bid(pid, action)
-    
-    if not game.auction:
-        container = next((c for c in game.containers if c['id'] == cid), None)
-        if container and container['bought']:
-            emit('bought', {
-                'item': container['item'],
-                'value': container['value'],
-                'cid': cid
-            }, room=game.players[container['buyer']]['sid'])
-    
-    send_state(gid)
-
-@socketio.on('skip_auction')
-def handle_skip_auction(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    game = games[gid]
-    pid = data.get('pid')
-    
-    if not game.started or game.game_over:
-        emit('error', {'msg': 'Игра не активна'})
-        return
-    
-    if not game.auction:
-        emit('error', {'msg': 'Аукцион не активен'})
-        return
-    
-    game.skip_auction(pid)
-    send_state(gid)
-
-@socketio.on('reset')
-def handle_reset(data):
-    gid = game_players.get(request.sid)
-    if not gid or gid not in games:
-        return
-    
-    games[gid] = Game()
-    game = games[gid]
-    
-    for pid in ['p1', 'p2']:
-        if game.players[pid]['sid']:
-            game.connected[pid] = True
-    
-    send_state(gid)
-
-def send_state(gid):
-    if gid not in games:
-        return
-    
-    game = games[gid]
-    
-    if game.round >= MAX_ROUNDS and game.waiting_for_next:
-        game.check_game()
-    
-    state = {
-        'round': game.round,
-        'max': MAX_ROUNDS,
-        'over': game.game_over,
-        'winner': game.winner,
-        'msg': game.message,
-        'auction': game.auction is not None,
-        'started': game.started,
-        'round_done': game.round_done,
-        'waiting_for_next': game.waiting_for_next,
-        'players': {},
-        'containers': []
+function updateMy() {
+    const id = pid === 'p1' ? 'p1' : 'p2';
+    const list = document.getElementById(id + 'list');
+    list.innerHTML = '';
+    if (myItems.length === 0) {
+        const span = document.createElement('span');
+        span.className = 'empty';
+        span.textContent = 'пусто';
+        list.appendChild(span);
+    } else {
+        myItems.forEach(item => {
+            const tag = document.createElement('span');
+            tag.className = 'tag yours';
+            tag.textContent = item;
+            list.appendChild(tag);
+        });
     }
-    
-    for pid, p in game.players.items():
-        state['players'][pid] = {
-            'name': p['name'],
-            'chips': p['chips'],
-            'containers': p['containers'],
-            'count': len(p['containers']),
-            'xray': p['xray'],
-            'intercept': p['intercept'],
-            'connected': game.connected[pid]
-        }
-        if game.game_over:
-            state['players'][pid]['score'] = p['score']
-        else:
-            state['players'][pid]['score'] = None
-    
-    for c in game.containers:
-        container_data = {
-            'id': c['id'],
-            'price': c['price'],
-            'bought': c['bought'],
-            'buyer': c['buyer'],
-            'revealed_to': c['revealed_to']
-        }
-        if c['bought'] and game.game_over:
-            container_data['item'] = c['item']
-            container_data['value'] = c['value']
-        else:
-            container_data['item'] = None
-            container_data['value'] = None
-        state['containers'].append(container_data)
-    
-    if game.auction:
-        state['auction_data'] = {
-            'price': game.auction['price'],
-            'raises': game.auction['raises'],
-            'max': AUCTION_MAX_RAISES,
-            'leader': game.auction['leader'],
-            'passed': game.auction['passed']
-        }
-        remaining = max(0, AUCTION_TIMEOUT - (time.time() - game.auction_start))
-        state['auction_time'] = remaining
-    
-    if game.started and not game.game_over and not game.round_done:
-        remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start))
-        state['time'] = remaining
-    
-    emit('state', state, room=gid)
+}
 
-# ---------------------------
-# 5. ЗАПУСК
-# ---------------------------
+function update(s) {
+    state = s;
+    document.getElementById('roundInfo').textContent = '📊 Раунд: ' + s.round + ' / ' + s.max;
+    if (s.msg) msg('info', s.msg);
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    updatePlayer('p1', s.players.p1);
+    updatePlayer('p2', s.players.p2);
+    updateContainers(s.containers);
+
+    if (s.auction) {
+        document.getElementById('auctionArea').style.display = 'block';
+        const a = s.auction_data;
+        const time = s.auction_time ? Math.ceil(s.auction_time) : 0;
+        document.getElementById('auctionInfo').innerHTML = `
+            <div>💰 Ставка: <strong>${a.price}</strong> фишек</div>
+            <div>🔄 Повышений: ${a.raises} / ${a.max}</div>
+            <div>👤 ${a.leader ? 'Лидер: ' + s.players[a.leader].name : '⏳ Ожидание'}</div>
+            <div style="color:#64748b;font-size:0.75em;margin-top:4px;">⏱️ ${time}с | Пас: ${a.passed.map(p => s.players[p].name).join(', ') || 'никто'}</div>
+        `;
+    } else {
+        document.getElementById('auctionArea').style.display = 'none';
+    }
+
+    // ТАЙМЕР - ОБНОВЛЯЕТСЯ КАЖДУЮ СЕКУНДУ
+    if (s.time !== undefined && !s.round_done) {
+        const pct = (s.time / 30) * 100;
+        document.getElementById('timerFill').style.width = pct + '%';
+        document.getElementById('timerDisplay').textContent = '⏱️ ' + Math.ceil(s.time) + 'с';
+    } else if (s.round_done) {
+        document.getElementById('timerDisplay').textContent = '⏱️ ✅';
+        document.getElementById('timerFill').style.width = '100%';
+    } else if (s.over) {
+        document.getElementById('timerDisplay').textContent = '⏱️ 🏁';
+    } else {
+        document.getElementById('timerDisplay').textContent = '⏱️ --';
+    }
+
+    if (s.over) {
+        document.getElementById('overScreen').style.display = 'block';
+        document.getElementById('overMsg').textContent = s.msg;
+        const details = document.getElementById('overDetails');
+        details.innerHTML = `
+            <div class="player">
+                <div class="name">👤 ${s.players.p1.name}</div>
+                <div class="line">📦 Контейнеров: <strong>${s.players.p1.count}</strong></div>
+                <div class="line">⭐ Очки: <strong>${s.players.p1.score}</strong></div>
+                <div class="line">💰 Фишки: <strong>${s.players.p1.chips}</strong></div>
+                <div class="line">📦 Контейнеры: <strong>${s.players.p1.containers.join(', ') || 'нет'}</strong></div>
+            </div>
+            <div class="player">
+                <div class="name">👤 ${s.players.p2.name}</div>
+                <div class="line">📦 Контейнеров: <strong>${s.players.p2.count}</strong></div>
+                <div class="line">⭐ Очки: <strong>${s.players.p2.score}</strong></div>
+                <div class="line">💰 Фишки: <strong>${s.players.p2.chips}</strong></div>
+                <div class="line">📦 Контейнеры: <strong>${s.players.p2.containers.join(', ') || 'нет'}</strong></div>
+            </div>
+        `;
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('interceptBtn').disabled = true;
+    } else {
+        document.getElementById('overScreen').style.display = 'none';
+    }
+
+    const you = s.players[pid];
+    if (you) {
+        document.getElementById('interceptBtn').disabled = you.intercept || s.over || !s.started;
+    }
+    document.getElementById('resetBtn').disabled = false;
+}
+
+function updatePlayer(id, data) {
+    const p = id === 'p1' ? '1' : '2';
+    const isYou = id === pid;
+
+    document.getElementById('p' + p + 'name').textContent = data.name;
+    document.getElementById('p' + p + 'chips').textContent = data.chips;
+
+    const score = document.getElementById('p' + p + 'score');
+    if (state && state.over) {
+        score.textContent = data.score;
+        score.className = 'val score';
+    } else {
+        score.textContent = '?';
+        score.className = 'val hidden';
+    }
+    document.getElementById('p' + p + 'count').textContent = data.count;
+
+    const list = document.getElementById('p' + p + 'list');
+    list.innerHTML = '';
+    if (isYou) {
+        if (myItems.length === 0) {
+            const span = document.createElement('span');
+            span.className = 'empty';
+            span.textContent = 'пусто';
+            list.appendChild(span);
+        } else {
+            myItems.forEach(item => {
+                const tag = document.createElement('span');
+                tag.className = 'tag yours';
+                tag.textContent = item;
+                list.appendChild(tag);
+            });
+        }
+    } else {
+        if (data.count > 0) {
+            const tag = document.createElement('span');
+            tag.className = 'tag hidden';
+            tag.textContent = '🔒 скрыто (' + data.count + ' шт.)';
+            list.appendChild(tag);
+        } else {
+            const span = document.createElement('span');
+            span.className = 'empty';
+            span.textContent = 'пусто';
+            list.appendChild(span);
+        }
+    }
+
+    const x = document.getElementById('p' + p + 'xray');
+    const i = document.getElementById('p' + p + 'intercept');
+    x.textContent = data.xray ? 'использован' : 'доступен';
+    x.className = data.xray ? 'used' : 'avail';
+    i.textContent = data.intercept ? 'использован' : 'доступен';
+    i.className = data.intercept ? 'used' : 'avail';
+}
+
+function updateContainers(containers) {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+    if (!containers || containers.length === 0) {
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = '📭 Нет контейнеров';
+        grid.appendChild(div);
+        return;
+    }
+
+    containers.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'box';
+
+        const isRevealed = revealed[c.id] !== undefined;
+        const revealData = revealed[c.id];
+
+        if (c.bought) {
+            if (state && state.over) {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div style="font-size:0.8em;color:#64748b;">Куплен</div>
+                    <div class="item-name">${c.item}</div>
+                    <div class="item-value">+${c.value} очков</div>
+                    <div style="font-size:0.7em;color:#64748b;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
+                `;
+            } else if (isRevealed) {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div style="font-size:0.8em;color:#64748b;">✅ Куплен</div>
+                    <div class="item-name">${revealData.item}</div>
+                    <div class="item-value">+${revealData.value} очков</div>
+                    <div style="font-size:0.7em;color:#64748b;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="bought-label">✅ Куплен</div>
+                    <div class="hidden-label">❓ содержимое скрыто</div>
+                    <div style="font-size:0.7em;color:#475569;margin-top:4px;">💰 ${c.price} фишек</div>
+                    <div style="font-size:0.7em;color:#475569;">${state.players[c.buyer] ? state.players[c.buyer].name : ''}</div>
+                `;
+            }
+        } else {
+            if (isRevealed) {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="price">${c.price}</div>
+                    <div class="lbl">фишек</div>
+                    <div class="xray-result">🔍 ${revealData.item} (+${revealData.value})</div>
+                    <div class="btns">
+                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                    </div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <span class="icon">📦</span>
+                    <div class="price">${c.price}</div>
+                    <div class="lbl">фишек</div>
+                    <div class="hidden-label">❓ содержимое скрыто</div>
+                    <div class="btns">
+                        <button class="btn btn-green" onclick="buy(${c.id})">💰 Купить</button>
+                        <button class="btn btn-gray" onclick="xray(${c.id})">🔍 Рентген</button>
+                    </div>
+                `;
+            }
+        }
+
+        grid.appendChild(div);
+    });
+}
+
+function startGame() { socket.emit('start', {}); document.getElementById('startBtn').disabled = true; }
+function buy(cid) { socket.emit('buy', { pid: pid, cid: cid }); }
+function xray(cid) { socket.emit('xray', { pid: pid, cid: cid }); }
+function intercept() { socket.emit('intercept', { pid: pid }); }
+function auction(action) { socket.emit('auction', { pid: pid, action: action }); }
+function skipAuction() { socket.emit('skip_auction', { pid: pid }); }
+
+function resetGame() {
+    if (confirm('🔄 Начать новую игру?')) {
+        myItems = [];
+        revealed = {};
+        socket.emit('reset', {});
+        document.getElementById('overScreen').style.display = 'none';
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('interceptBtn').disabled = false;
+        msg('info', '🔄 Новая игра');
+        setTimeout(() => location.reload(), 500);
+    }
+}
+
+document.getElementById('startBtn').disabled = true;
+</script>
+</body>
+</html>
