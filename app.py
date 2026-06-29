@@ -69,13 +69,11 @@ class Game:
         self.message = "Добро пожаловать!"
         self.started = False
         self.connected = {'p1': False, 'p2': False}
-        self.round_done = False
-        self.waiting = False
-        self.round_start = 0
-        self.auction_start = 0
-        self.auto_next = False
+        self.round_active = False
+        self.round_start_time = 0
+        self.auction_start_time = 0
         self.timer_thread = None
-        self.round_timer_triggered = False
+        self.timer_running = False
         
     def create_containers(self):
         if not self.pool:
@@ -189,9 +187,8 @@ class Game:
             'raises': 0,
             'leader': None,
             'passed': [],
-            'start': time.time()
         }
-        self.auction_start = time.time()
+        self.auction_start_time = time.time()
         self.message = f"Аукцион! Старт: {container['price']} фишек"
         return True
     
@@ -212,7 +209,7 @@ class Game:
             self.message = "Контейнер уже куплен"
             return False
         
-        if time.time() - self.auction_start > AUCTION_TIMEOUT:
+        if time.time() - self.auction_start_time > AUCTION_TIMEOUT:
             self.auction = None
             if auction['leader']:
                 if self.buy_container(auction['leader'], container['id']):
@@ -220,7 +217,6 @@ class Game:
             else:
                 container['bought'] = True
                 self.message = "Время аукциона вышло!"
-            self.check_round()
             return True
         
         if action == 'raise':
@@ -242,7 +238,6 @@ class Game:
                 if self.buy_container(pid, container['id']):
                     self.auction = None
                     self.message = f"{player['name']} выиграл аукцион!"
-                    self.check_round()
             return True
             
         elif action == 'pass':
@@ -253,13 +248,11 @@ class Game:
                 self.auction = None
                 container['bought'] = True
                 self.message = "Оба пасовали! Контейнер ушел в сброс"
-                self.check_round()
             elif len(auction['passed']) == 1:
                 winner = 'p1' if 'p1' not in auction['passed'] else 'p2'
                 if self.buy_container(winner, container['id']):
                     self.auction = None
                     self.message = f"{self.players[winner]['name']} получает контейнер"
-                    self.check_round()
             return True
             
         elif action == 'buy':
@@ -270,7 +263,6 @@ class Game:
             if self.buy_container(pid, container['id']):
                 self.auction = None
                 self.message = f"{player['name']} купил контейнер!"
-                self.check_round()
                 return True
         
         return False
@@ -284,91 +276,78 @@ class Game:
             container['bought'] = True
             self.auction = None
             self.message = f"{self.players[pid]['name']} пропустил аукцион"
-            self.check_round()
             return True
         return False
     
-    def check_round(self):
-        if not self.started:
+    def check_round_end(self):
+        """Проверяет, закончился ли раунд"""
+        if not self.round_active:
             return False
-            
-        available = self.get_available()
         
-        # Проверяем все ли контейнеры куплены
+        # Все контейнеры куплены?
+        available = self.get_available()
         if not available:
-            if not self.round_done:
-                self.round_done = True
-                self.waiting = True
-                self.message = "Все контейнеры куплены!"
-                self.auto_next = True
-                print(f"✅ Раунд {self.round} завершен - все контейнеры куплены")
+            self.round_active = False
+            self.message = "Все контейнеры куплены!"
             return True
         
-        # Проверяем таймаут раунда
-        elapsed = time.time() - self.round_start
-        if elapsed > ROUND_TIMEOUT:
-            if not self.round_done:
-                # Все некупленные контейнеры уходят в сброс
-                for c in available:
-                    c['bought'] = True
-                self.round_done = True
-                self.waiting = True
-                self.message = "Время раунда вышло!"
-                self.auto_next = True
-                print(f"⏰ Раунд {self.round} завершен по таймауту ({elapsed:.1f}с)")
+        # Время вышло?
+        if time.time() - self.round_start_time > ROUND_TIMEOUT:
+            # Все некупленные контейнеры уходят в сброс
+            for c in available:
+                c['bought'] = True
+            self.round_active = False
+            self.message = "Время раунда вышло!"
             return True
         
         return False
     
-    def check_game(self):
-        if self.round >= MAX_ROUNDS and self.waiting and not self.game_over:
-            for p in self.players.values():
-                p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
-            
-            p1, p2 = self.players['p1'], self.players['p2']
-            
-            if len(p1['containers']) < MIN_CONTAINERS:
-                self.winner = 'p2'
-            elif len(p2['containers']) < MIN_CONTAINERS:
-                self.winner = 'p1'
-            elif p1['score'] > p2['score']:
-                self.winner = 'p1'
-            elif p2['score'] > p1['score']:
-                self.winner = 'p2'
-            else:
-                if p1['chips'] > p2['chips']:
+    def check_game_end(self):
+        """Проверяет, закончилась ли игра"""
+        if self.round >= MAX_ROUNDS and not self.round_active:
+            if not self.game_over:
+                for p in self.players.values():
+                    p['score'] = sum(VALUES.get(c, 0) for c in p['containers'])
+                
+                p1, p2 = self.players['p1'], self.players['p2']
+                
+                if len(p1['containers']) < MIN_CONTAINERS:
+                    self.winner = 'p2'
+                elif len(p2['containers']) < MIN_CONTAINERS:
                     self.winner = 'p1'
-                elif p2['chips'] > p1['chips']:
+                elif p1['score'] > p2['score']:
+                    self.winner = 'p1'
+                elif p2['score'] > p1['score']:
                     self.winner = 'p2'
                 else:
-                    self.winner = 'draw'
-            
-            self.game_over = True
-            print(f"🏆 Игра окончена! Победитель: {self.winner}")
-            return True
+                    if p1['chips'] > p2['chips']:
+                        self.winner = 'p1'
+                    elif p2['chips'] > p1['chips']:
+                        self.winner = 'p2'
+                    else:
+                        self.winner = 'draw'
+                
+                self.game_over = True
+                self.message = f"Игра окончена! Победитель: {self.players[self.winner]['name'] if self.winner != 'draw' else 'Ничья'}"
+                return True
         return False
     
-    def next_round(self):
+    def start_next_round(self):
+        """Начинает следующий раунд"""
         if self.round >= MAX_ROUNDS:
-            print(f"⚠️ Попытка начать раунд {self.round + 1}, но максимум {MAX_ROUNDS}")
             return
         
         self.round += 1
         self.containers = self.create_containers()
-        self.round_start = time.time()
+        self.round_active = True
+        self.round_start_time = time.time()
         self.auction = None
-        self.round_done = False
-        self.waiting = False
-        self.auto_next = False
-        self.round_timer_triggered = False
         self.message = f"Раунд {self.round} начался!"
         
-        print(f"🔄 Начало раунда {self.round}, контейнеров: {len(self.containers)}")
-        
+        # Если только 1 контейнер - сразу аукцион
         available = self.get_available()
         if len(available) == 1:
             self.start_auction(available[0]['id'])
-            print(f"🔨 Аукцион запущен для контейнера {available[0]['id']}")
 
 # ---------------------------
 # 3. ТАЙМЕР
@@ -387,13 +366,24 @@ def start_timer(gid):
                 time.sleep(0.5)
                 continue
             
-            # Проверяем время раунда
-            if not game.round_done and game.started:
-                game.check_round()
+            # Проверяем завершение раунда
+            if game.round_active:
+                if game.check_round_end():
+                    print(f"✅ Раунд {game.round} завершен")
+                    # Проверяем завершение игры
+                    if game.check_game_end():
+                        print(f"🏆 Игра окончена!")
+                    else:
+                        # Запускаем следующий раунд через 2 секунды
+                        print(f"⏳ Запуск следующего раунда через 2 секунды...")
+                        time.sleep(2)
+                        if not game.game_over:
+                            game.start_next_round()
+                            print(f"🔄 Раунд {game.round} начался")
             
             # Проверяем время аукциона
             if game.auction:
-                elapsed = time.time() - game.auction_start
+                elapsed = time.time() - game.auction_start_time
                 if elapsed > AUCTION_TIMEOUT:
                     print(f"⏰ Аукцион завершен по таймауту")
                     cid = game.auction['id']
@@ -406,23 +396,6 @@ def start_timer(gid):
                             container['bought'] = True
                             game.message = "Время аукциона вышло!"
                     game.auction = None
-                    game.check_round()
-            
-            # Автоматический переход на следующий раунд
-            if game.waiting and game.auto_next and not game.game_over:
-                game.auto_next = False
-                game.waiting = False
-                print(f"🔄 Автоматический переход на следующий раунд")
-                
-                # Проверяем, не закончилась ли игра
-                if game.round >= MAX_ROUNDS:
-                    game.check_game()
-                else:
-                    game.next_round()
-            
-            # Проверяем завершение игры после 3 раундов
-            if game.round >= MAX_ROUNDS and game.waiting:
-                game.check_game()
             
             send_state(gid)
             time.sleep(0.3)
@@ -502,7 +475,7 @@ def handle_start(data):
     
     if not game.started:
         game.started = True
-        game.next_round()
+        game.start_next_round()
         if game.timer_thread is None:
             game.timer_thread = start_timer(gid)
         send_state(gid)
@@ -535,7 +508,6 @@ def handle_buy(data):
                 'cid': cid
             }, room=game.players[pid]['sid'])
     
-    game.check_round()
     send_state(gid)
 
 @socketio.on('xray')
@@ -669,9 +641,6 @@ def send_state(gid):
     
     game = games[gid]
     
-    if game.round >= MAX_ROUNDS and game.waiting and not game.game_over:
-        game.check_game()
-    
     state = {
         'round': game.round,
         'max': MAX_ROUNDS,
@@ -680,8 +649,7 @@ def send_state(gid):
         'msg': game.message,
         'auction': game.auction is not None,
         'started': game.started,
-        'round_done': game.round_done,
-        'waiting': game.waiting,
+        'round_active': game.round_active,
         'players': {},
         'containers': []
     }
@@ -725,13 +693,14 @@ def send_state(gid):
             'leader': game.auction['leader'],
             'passed': game.auction['passed']
         }
-        remaining = max(0, AUCTION_TIMEOUT - (time.time() - game.auction_start))
+        remaining = max(0, AUCTION_TIMEOUT - (time.time() - game.auction_start_time))
         state['auction_time'] = remaining
     else:
         state['auction_time'] = None
     
-    if game.started and not game.game_over and not game.round_done:
-        remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start))
+    # Время раунда
+    if game.started and not game.game_over and game.round_active:
+        remaining = max(0, ROUND_TIMEOUT - (time.time() - game.round_start_time))
         state['time'] = remaining
     else:
         state['time'] = None
