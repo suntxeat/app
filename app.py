@@ -75,6 +75,7 @@ class Game:
         self.auction_start = 0
         self.auto_next = False
         self.timer_thread = None
+        self.timer_running = False
         
     def create_containers(self):
         if not self.pool:
@@ -348,10 +349,6 @@ class Game:
         self.auto_next = False
         self.message = f"Раунд {self.round} начался!"
         
-        # Обновляем способности для нового раунда
-        # (оставляем использованные, но они уже помечены)
-        # Для нового раунда не сбрасываем способности
-        
         available = self.get_available()
         if len(available) == 1:
             self.start_auction(available[0]['id'])
@@ -368,7 +365,7 @@ def start_timer(gid):
                 break
             
             if not game.started or game.game_over:
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
             
             # Проверяем время раунда
@@ -396,7 +393,7 @@ def start_timer(gid):
                 game.next_round()
             
             send_state(gid)
-            time.sleep(0.5)
+            time.sleep(0.3)
     
     thread = threading.Thread(target=timer_loop, daemon=True)
     thread.start()
@@ -618,7 +615,6 @@ def handle_reset(data):
     old_game = games[gid]
     games[gid] = Game()
     new_game = games[gid]
-    # Копируем подключения
     new_game.connected = old_game.connected
     new_game.players['p1']['sid'] = old_game.players['p1']['sid']
     new_game.players['p2']['sid'] = old_game.players['p2']['sid']
